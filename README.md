@@ -1,6 +1,6 @@
 # SerialKiller
 
-A better serial terminal written in Python3
+A less annoying serial terminal written in Python3
 
 ```
 laptop ~/dev/serialkiller master > sk --help
