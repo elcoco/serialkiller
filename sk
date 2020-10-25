@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 
 import threading
-import serial
 import os,sys
 import time
 import argparse
 import readline     # interactive mode history at input()
 import datetime
-
 import logging
+
+import serial
+from serial.tools.list_ports import comports
+
 
 # TODO log to file
 
@@ -68,22 +70,27 @@ class LockFile():
 
 
 class ConnManager(threading.Thread, LockFile):
-    def __init__(self, lockfile, port, baudrate, timeout):
+    def __init__(self, lockfile, ports, baudrate, timeout):
         threading.Thread.__init__(self)
         LockFile.__init__(self, lockfile)
         self.stopped = False
-        self.port = port
+        self.ports = ports
         self.baudrate = baudrate
         self.timeout = timeout
         self.ser = None
 
     def connect(self):
-        try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
-            logger.info(f"Connected to {self.port} @ {self.baudrate}")
-            return self.ser
-        except serial.serialutil.SerialException as e:
-            logger.error(e)
+        # try all ports in list, NOTE discovery is somehow super slow from thread
+        for port in self.ports:
+            logger.debug(f"Trying to connect to {port}")
+            try:
+                self.ser = serial.Serial(port, self.baudrate, timeout=self.timeout, exclusive=True)
+                logger.info(f"Connected to {port} @ {self.baudrate}")
+                logger.info(f"Exit using CTRL+C")
+                self.port = port
+                return self.ser
+            except serial.serialutil.SerialException as e:
+                logger.error(e)
 
     def stop(self):
         logger.debug("Stopping connection manager thread")
@@ -213,7 +220,7 @@ class SerialKiller(LockFile, Helper):
         self.conn_manager_thread.stop()
 
     def start_threads(self):
-        self.conn_manager_thread = ConnManager(self.lockfile, self.port, self.baudrate, self.timeout)
+        self.conn_manager_thread = ConnManager(self.lockfile, self.ports, self.baudrate, self.timeout)
         self.conn_manager_thread.start()
         self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
         self.reader_thread.start()
@@ -231,7 +238,7 @@ class SerialKiller(LockFile, Helper):
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
-        parser.add_argument('-p', '--port',        help="default: /dev/ttyUSB0", default='/dev/ttyUSB0')
+        parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
         parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default='115200')
         parser.add_argument('-t', '--timeout',     help="default: 0", default=0)
         parser.add_argument('-L', '--log',         help="log data to file", action='store_true')
@@ -256,6 +263,9 @@ class SerialKiller(LockFile, Helper):
         else:
             logger.setLevel(logging.INFO)
             streamhandler.setFormatter(formatter_info)
+
+        # discover available ports if no port is supplied on CLI
+        self.ports = [self.port] if self.port else [dev.device for dev in comports(include_links=True)]
 
         self.log_dir = os.path.abspath(self.log_dir)
         if self.do_log:
