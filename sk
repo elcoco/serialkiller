@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+
+import threading
+import serial
+import os,sys
+import time
+import argparse
+
+import logging
+
+
+formatter_info = logging.Formatter('%(message)s')
+formatter_debug = logging.Formatter('%(levelname)5s %(module)3s.%(funcName)-10s %(lineno)3s %(message)s')
+
+logger = logging.getLogger('serialkiller')
+logger.setLevel(logging.DEBUG)
+
+streamhandler = logging.StreamHandler(sys.stdout)
+streamhandler.setLevel(logging.DEBUG)
+logger.addHandler(streamhandler)
+
+
+class LockFile():
+    def __init__(self, path):
+        self.lockfile = path
+
+    def is_locked(self):
+        return os.path.isfile(self.lockfile)
+
+    def lock(self):
+        with open(self.lockfile, 'w'):
+            pass
+        logger.info(f"Created lockfile: {self.lockfile}")
+
+    def unlock(self):
+        try:
+            os.remove(self.lockfile)
+            logger.info(f"Removed lockfile: {self.lockfile}")
+        except FileNotFoundError:
+            logger.error('Serialkiller is not locked')
+
+
+class LockFileThread(threading.Thread, LockFile):
+    def __init__(self, ser):
+        threading.Thread.__init__(self)
+        LockFile.__init__(self, lockfile)
+        self.stopped = False
+
+    def stop(self):
+        logger.debug("Stopping lockfile thread")
+        self.stopped = True
+
+
+
+class ReaderThread(threading.Thread, LockFile):
+    def __init__(self, ser):
+        threading.Thread.__init__(self)
+        self.stopped = False
+        self.ser = ser
+        self.paused = False
+
+
+    def stop(self):
+        logger.debug("stopping reader thread")
+        self.stopped = True
+
+    def pause(self, state):
+        self.paused = state
+
+    def sanitize(self, data):
+        return data.strip(' ')
+
+    def non_blocking_read(self):
+        buf = ''
+        while not self.stopped:
+            if self.paused:
+                continue
+
+            c = self.ser.read().decode()
+
+            if not c:
+                continue
+            elif c == '\n':
+                return buf
+            else:
+                buf += c
+
+    def run(self):
+        logger.debug("starting reader thread")
+        while not self.stopped:
+
+            try:
+                data = self.non_blocking_read()
+            except serial.serialutil.SerialException as e:
+                logger.error(e)
+                self.stop()
+                continue
+
+            if data == None:
+                continue
+            data = self.sanitize(data)
+            if data:
+                print(f"< {data}")
+
+
+class SerialKiller(LockFile):
+    def __init__(self):
+        LockFile.__init__(self, '/tmp/serialkiller.lock')
+
+    def connect(self):
+        logger.debug(f"connecting to {self.port} @ {self.baudrate}")
+        try:
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+            return self.ser
+        except serial.serialutil.SerialException as e:
+            logger.error(e)
+            return
+
+    def stop_threads(self):
+        self.reader_thread.stop()
+
+    def start_threads(self):
+        self.reader_thread = ReaderThread(self.ser)
+        self.reader_thread.start()
+
+    def read_input(self):
+        return input()
+
+    def send_data(self, data):
+        data += '\n'
+        self.reader_thread.pause(True)
+        self.ser.write(data.encode())
+        self.reader_thread.pause(False)
+        print(f"> {data}")
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
+        parser.add_argument('-b', '--baudrate',    help="", default='115200')
+        parser.add_argument('-p', '--port',        help="", default='/dev/ttyUSB0')
+        parser.add_argument('-t', '--timeout',     help="", default=0)
+        parser.add_argument('-d', '--debug',       help="", action='store_true')
+        parser.add_argument('-l', '--lock',        help="", action='store_true')
+        parser.add_argument('-u', '--unlock',      help="", action='store_true')
+        args = parser.parse_args()
+
+        self.port = args.port
+        self.baudrate = args.baudrate
+        self.timeout = args.timeout
+        self.debug = args.debug
+        self.do_lock = args.lock
+        self.do_unlock = args.unlock
+
+        if args.debug:
+            logger.setLevel(logging.DEBUG)
+            streamhandler.setFormatter(formatter_debug)
+        else:
+            logger.setLevel(logging.INFO)
+            streamhandler.setFormatter(formatter_info)
+
+    def run(self):
+        self.parse_args()
+
+        if self.do_lock:
+            self.lock()
+            return
+            
+        if self.do_unlock:
+            self.unlock()
+            return
+
+        if not self.connect():
+            return
+
+        self.start_threads()
+
+        data = ''
+        while data != None:
+            try:
+                data = self.read_input()
+                self.send_data(data)
+            except KeyboardInterrupt:
+                break
+
+            except serial.serialutil.SerialException as e:
+                logger.error(e)
+                break
+
+        self.stop_threads()
+        logger.debug("Closing serial port")
+        self.ser.close()
+
+if __name__ == "__main__":
+    sk = SerialKiller()
+    sk.run()
+
+
+
