@@ -75,7 +75,7 @@ class ConnManager(threading.Thread, LockFile):
         self.ser = None
 
     def connect(self):
-        logger.debug(f"connecting to {self.port} @ {self.baudrate}")
+        logger.info(f"Connecting to {self.port} @ {self.baudrate}")
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
             return self.ser
@@ -106,9 +106,13 @@ class ConnManager(threading.Thread, LockFile):
 
         self.ser.write(data.encode())
 
+    def close(self):
+        logger.info("Closing connection")
+        if self.ser != None:
+            self.ser.close()
+
     def run(self):
         logger.debug("Starting connection manager thread")
-        self.connect()
         msg_shown = False
 
         while not self.stopped:
@@ -127,8 +131,7 @@ class ConnManager(threading.Thread, LockFile):
                     self.connect()
 
 
-        logger.debug("Closing serial port")
-        self.ser.close()
+        self.close()
 
 
 class ReaderThread(threading.Thread, LockFile, Helper):
@@ -140,7 +143,7 @@ class ReaderThread(threading.Thread, LockFile, Helper):
         self.paused = False
 
     def stop(self):
-        logger.debug("stopping reader thread")
+        logger.debug("Stopping reader thread")
         self.stopped = True
 
     def pause(self, state):
@@ -166,7 +169,7 @@ class ReaderThread(threading.Thread, LockFile, Helper):
                 buf += c
 
     def run(self):
-        logger.debug("starting reader thread")
+        logger.debug("Starting reader thread")
         while not self.stopped:
 
             try:
@@ -242,6 +245,10 @@ class SerialKiller(LockFile, Helper):
             return
 
         self.start_threads()
+
+        if not self.conn_manager_thread.connect():
+            self.stop_threads()
+            return
 
         data = ''
         while data != None:
