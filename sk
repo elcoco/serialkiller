@@ -82,7 +82,7 @@ class ConnManager(threading.Thread, LockFile):
     def connect(self):
         # try all ports in list, NOTE discovery is somehow super slow from thread
         for port in self.ports:
-            logger.debug(f"Trying to connect to {port}")
+            logger.info(f"Trying to connect to {port}")
             try:
                 self.ser = serial.Serial(port, self.baudrate, timeout=self.timeout, exclusive=True)
                 logger.info(f"Connected to {port} @ {self.baudrate}")
@@ -119,8 +119,8 @@ class ConnManager(threading.Thread, LockFile):
         self.ser.write(data.encode())
 
     def close(self):
-        logger.info("Closing connection")
         if self.ser != None:
+            logger.info("Closing connection")
             self.ser.close()
 
     def run(self):
