@@ -211,12 +211,12 @@ class SerialKiller(LockFile, Helper):
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
-        parser.add_argument('-b', '--baudrate',    help="", default='115200')
-        parser.add_argument('-p', '--port',        help="", default='/dev/ttyUSB0')
-        parser.add_argument('-t', '--timeout',     help="", default=0)
-        parser.add_argument('-d', '--debug',       help="", action='store_true')
-        parser.add_argument('-l', '--lock',        help="", action='store_true')
-        parser.add_argument('-u', '--unlock',      help="", action='store_true')
+        parser.add_argument('-p', '--port',        help="default: /dev/ttyUSB0", default='/dev/ttyUSB0')
+        parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default='115200')
+        parser.add_argument('-t', '--timeout',     help="default: 0", default=0)
+        parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
+        parser.add_argument('-u', '--unlock',      help="reconnect to serial", action='store_true')
+        parser.add_argument('-d', '--debug',       help="enable debugging", action='store_true')
         args = parser.parse_args()
 
         self.port = args.port
