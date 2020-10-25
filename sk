@@ -5,6 +5,7 @@ import serial
 import os,sys
 import time
 import argparse
+import readline     # interactive mode history at input()
 
 import logging
 
@@ -189,6 +190,13 @@ class SerialKiller(LockFile, Helper):
         self.lockfile = '/tmp/serialkiller.lock'
         LockFile.__init__(self, self.lockfile)
 
+        # readline lib will use this file to read/write history
+        self.history_path = '/tmp/sk_history.txt'
+        try:
+            readline.read_history_file(self.history_path)
+        except FileNotFoundError:
+            pass
+
     def stop_threads(self):
         self.reader_thread.stop()
         self.conn_manager_thread.stop()
@@ -200,7 +208,9 @@ class SerialKiller(LockFile, Helper):
         self.reader_thread.start()
 
     def read_input(self):
-        return input()
+        data =  input()
+        readline.write_history_file(self.history_path)
+        return data
 
     def send_data(self, data):
         print(self.colorize('>', 'bmagenta'), data)
