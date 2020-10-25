@@ -76,9 +76,9 @@ class ConnManager(threading.Thread, LockFile):
         self.ser = None
 
     def connect(self):
-        logger.info(f"Connecting to {self.port} @ {self.baudrate}")
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+            logger.info(f"Connected to {self.port} @ {self.baudrate}")
             return self.ser
         except serial.serialutil.SerialException as e:
             logger.error(e)
@@ -96,7 +96,10 @@ class ConnManager(threading.Thread, LockFile):
         if self.is_locked():
             return
 
-        return self.ser.read().decode()
+        try:
+            return self.ser.read().decode()
+        except UnicodeDecodeError as e:
+            logger.error(e)
 
     def send(self, data):
         if self.ser == None:
