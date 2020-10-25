@@ -213,11 +213,10 @@ class SerialKiller(LockFile, Helper):
         return data
 
     def send_data(self, data):
-        print(self.colorize('>', 'bmagenta'), data)
-        data += '\n'
         self.reader_thread.pause(True)
-        self.conn_manager_thread.send(data)
+        self.conn_manager_thread.send(data + '\n')
         self.reader_thread.pause(False)
+        print(self.colorize('>', 'bmagenta'), data)
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
