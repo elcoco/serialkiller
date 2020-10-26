@@ -1,4 +1,4 @@
-# SerialKiller
+## Serial Killer
 
 A less annoying serial terminal written in Python3
 
