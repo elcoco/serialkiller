@@ -2,6 +2,30 @@
 
 A less annoying serial terminal written in Python3
 
+### Features
+- *temporary free up port* to upload code, using an external command
+- *log data* to file
+- *autodetect* serial port
+- readline *history* with ↑↓
+
+Nobody likes to use the arduino IDE but it functions well for uploading code to your MCU.
+Now it's slightly easier to use your favorite editor, keeping a serial monitor open and uploading code without manualy
+exiting serial monitor to free up serial port for code upload.
+
+eg:
+```
+# This example will free up serial, upload code and connect to serial again.
+$ sk -l && arduino --upload my_super_awesome_project.ino && sk -u
+```
+
+### Vim keybinding
+```
+# Add this line to your .vimrc file to compile and upload current file using arduino IDE
+nnoremap <C-a> :w<CR>:!sk -l ; arduino --upload % ; sk -u<CR>
+```
+
+
+### Help
 ```
 laptop ~/dev/serialkiller master > sk --help
 usage: sk [-h] [-p PORT] [-b RATE] [-t TIMEOUT] [-L] [-P LOG_DIR] [-l] [-u] [-d]
