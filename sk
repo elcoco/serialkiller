@@ -284,6 +284,12 @@ class SerialKiller(LockFile, Helper):
         # discover available ports if no port is supplied on CLI
         self.ports = [self.port] if self.port else [dev.device for dev in comports(include_links=True)]
 
+        # sort USB ports to the front
+        self.ports = [p for p in self.ports if 'USB' in p] + [p for p in self.ports if not 'USB' in p]
+
+        for port in self.ports:
+            logger.debug(f"Found serial port: {port}")
+
         self.log_dir = os.path.abspath(self.log_dir)
         if self.do_log:
 
