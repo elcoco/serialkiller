@@ -31,6 +31,9 @@ $ sk -l
 
 # Reconnect (unlock) serial port of running sk instance
 $ sk -u
+
+# Log to file, file will be created inside dir ~
+$ sk -L -P ~
 ```
 
 ### Vim keybinding
