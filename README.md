@@ -3,7 +3,7 @@
 A less annoying serial terminal written in Python3
 
 ### Features
-- **temporary free up port** to upload code, using an external command
+- **temporary free up port** to upload code by using an external command
 - **log data** to file
 - **autodetect** serial port
 - readline **history** with ↑↓
