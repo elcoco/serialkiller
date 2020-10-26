@@ -18,6 +18,21 @@ eg:
 $ sk -l && arduino --upload my_super_awesome_project.ino && sk -u
 ```
 
+### Starting serial monitor
+```
+# Try to guess serial port, using default baudrate, 115200
+$ sk
+
+# Specify port and baudrate
+$ sk -p /dev/ttyUSB0 -b 9600
+
+# Free up (lock) serial port of running sk instance
+$ sk -l
+
+# Reconnect (unlock) serial port of running sk instance
+$ sk -u
+```
+
 ### Vim keybinding
 ```
 # Add this line to your .vimrc file to compile and upload current file using arduino IDE
