@@ -3,10 +3,10 @@
 A less annoying serial terminal written in Python3
 
 ### Features
-- *temporary free up port* to upload code, using an external command
-- *log data* to file
-- *autodetect* serial port
-- readline *history* with ↑↓
+- **temporary free up port** to upload code, using an external command
+- **log data** to file
+- **autodetect** serial port
+- readline **history** with ↑↓
 
 Nobody likes to use the arduino IDE, but it functions well for uploading code to your MCU.  
 Now it's slightly easier to use your favorite editor, keeping a serial monitor open and  
