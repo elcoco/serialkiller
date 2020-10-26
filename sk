@@ -88,10 +88,9 @@ class ConnManager(threading.Thread, LockFile):
     def connect(self, port, baudrate, timeout=0):
         try:
             self.ser = serial.Serial(port, baudrate, timeout=timeout, exclusive=True)
-            logger.info(f"Connected to {port} @ {baudrate}")
-            logger.info(f"Exit using CTRL+C")
+            logger.info(f"Connected to {port} @ {baudrate} | Exit using CTRL+C")
 
-            # save serial connection info so we can connect without trying the whole list again
+            # save serial connection info so we can reconnect quicker
             self.port = port
             self.baudrate = baudrate
             self.timeout = timeout
@@ -158,7 +157,7 @@ class ConnManager(threading.Thread, LockFile):
                 msg_shown = False
                 logger.info("Serial is unlocked")
                 if not self.ser.is_open:
-                    self.connect()
+                    self.connect(self.port, self.baudrate, self.timeout)
 
 
         self.close()
