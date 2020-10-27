@@ -19,7 +19,7 @@ eg:
 $ sk -l && arduino --upload my_super_awesome_project.ino && sk -u
 ```
 
-### Starting serial monitor
+### Examples
 ```
 # Try to guess serial port, using default baudrate, 115200
 $ sk
@@ -45,7 +45,6 @@ $ sk -L -P ~
 # Add this line to your .vimrc file to compile and upload current file using arduino IDE
 nnoremap <C-a> :w<CR>:!sk -l ; arduino --upload % ; sk -u<CR>
 ```
-
 
 ### Help
 ```
