@@ -3,6 +3,7 @@
 A less annoying serial terminal written in Python3
 
 ### Features
+- send and receive data over serial port or serial over TCP
 - **temporary free up port** to upload code by using an external command
 - **log data** to file
 - **autodetect** serial port
@@ -25,6 +26,9 @@ $ sk
 
 # Specify port and baudrate
 $ sk -p /dev/ttyUSB0 -b 9600
+
+# Specify url to connect over eg telnet
+$ sk -u socket://localhost:23
 
 # Free up (lock) serial port of running sk instance
 $ sk -l

@@ -69,7 +69,7 @@ class LockFile():
             logger.error('Serialkiller is not locked')
 
 
-class ConnManager(threading.Thread, LockFile):
+class SerialConnThread(threading.Thread, LockFile):
     def __init__(self, lockfile):
         threading.Thread.__init__(self)
         LockFile.__init__(self, lockfile)
@@ -79,13 +79,23 @@ class ConnManager(threading.Thread, LockFile):
         self.ports = None
         self.baudrate = None
         self.timeout = None
+        self.url = None
 
         # holds serial connection object
         self.ser = None
 
-        self.baudrates = [ 9600, 12000, 115200 ]
+    def connect_TCP(self, url, timeout=0):
+        # Create connection over TCP
+        try:
+            self.ser =  serial.serial_for_url(url, timeout=1)
+            logger.info(f"Connected to {url} | Exit using CTRL+C")
+            self.url = url
+            return self.ser
+        except serial.serialutil.SerialException as e:
+            logger.error(e)
 
-    def connect(self, port, baudrate, timeout=0):
+    def connect_serial(self, port, baudrate, timeout=0):
+        # Create connection over Serial port
         try:
             self.ser = serial.Serial(port, baudrate, timeout=timeout, exclusive=True)
             logger.info(f"Connected to {port} @ {baudrate} | Exit using CTRL+C")
@@ -102,17 +112,17 @@ class ConnManager(threading.Thread, LockFile):
         # try all ports in list, NOTE discovery is somehow super slow from thread
         for port in ports:
             logger.info(f"Trying to connect to {port}")
-            if self.connect(port, baudrate, timeout):
+            if self.connect_serial(port, baudrate, timeout):
                 return True
         else:
             logger.error("No serial ports found")
-
 
     def stop(self):
         logger.debug("Stopping connection manager thread")
         self.stopped = True
 
     def get_char(self):
+        # TODO handle pause on this level
         if self.ser == None:
             return
         if not self.ser.is_open:
@@ -127,6 +137,7 @@ class ConnManager(threading.Thread, LockFile):
             logger.error(f"Wrong baudrate? {self.baudrate}")
 
     def send(self, data):
+        # TODO handle pause on this level
         if self.ser == None:
             return
         if self.is_locked():
@@ -157,7 +168,10 @@ class ConnManager(threading.Thread, LockFile):
                 msg_shown = False
                 logger.info("Serial is unlocked")
                 if not self.ser.is_open:
-                    self.connect(self.port, self.baudrate, self.timeout)
+                    if self.url:
+                        self.connect_TCP(self.url, self.timeout)
+                    else:
+                        self.connect_serial(self.port, self.baudrate, self.timeout)
 
 
         self.close()
@@ -237,7 +251,8 @@ class SerialKiller(LockFile, Helper):
         self.conn_manager_thread.stop()
 
     def start_threads(self):
-        self.conn_manager_thread = ConnManager(self.lockfile)
+        # this thread is passed to every thread that needs serial access
+        self.conn_manager_thread = SerialConnThread(self.lockfile)
         self.conn_manager_thread.start()
         self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
         self.reader_thread.start()
@@ -257,6 +272,7 @@ class SerialKiller(LockFile, Helper):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
         parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
         parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default=115200)
+        parser.add_argument('-U', '--url',         help="url eg: socket://host:port", default=None)
         parser.add_argument('-t', '--timeout',     help="default: 0", default=0)
         parser.add_argument('-L', '--log',         help="log data to file", action='store_true')
         parser.add_argument('-P', '--log_dir',     help="specify log dir", default=os.path.expanduser('~'))
@@ -269,6 +285,7 @@ class SerialKiller(LockFile, Helper):
         self.baudrate = args.baudrate
         self.timeout = args.timeout
         self.debug = args.debug
+        self.url = args.url
         self.do_lock = args.lock
         self.do_unlock = args.unlock
         self.do_log = args.log
@@ -281,14 +298,16 @@ class SerialKiller(LockFile, Helper):
             logger.setLevel(logging.INFO)
             streamhandler.setFormatter(formatter_info)
 
-        # discover available ports if no port is supplied on CLI
-        self.ports = [self.port] if self.port else [dev.device for dev in comports(include_links=True)]
+        # only do port discovery if no url is given
+        if not self.url:
+            # discover available ports if no port is supplied on CLI
+            self.ports = [self.port] if self.port else [dev.device for dev in comports(include_links=True)]
 
-        # sort USB ports to the front
-        self.ports = [p for p in self.ports if 'USB' in p] + [p for p in self.ports if not 'USB' in p]
+            # sort USB ports to the front
+            self.ports = [p for p in self.ports if 'USB' in p] + [p for p in self.ports if not 'USB' in p]
 
-        for port in self.ports:
-            logger.debug(f"Found serial port: {port}")
+            for port in self.ports:
+                logger.debug(f"Found serial port: {port}")
 
         self.log_dir = os.path.abspath(self.log_dir)
         if self.do_log:
@@ -315,9 +334,15 @@ class SerialKiller(LockFile, Helper):
 
         self.start_threads()
 
-        if not self.conn_manager_thread.try_connect_ports(self.ports, self.baudrate, self.timeout):
-            self.stop_threads()
-            return
+        if self.url:
+            if not self.conn_manager_thread.connect_TCP(self.url, self.timeout):
+                self.stop_threads()
+                return
+            
+        else:
+            if not self.conn_manager_thread.try_connect_ports(self.ports, self.baudrate, self.timeout):
+                self.stop_threads()
+                return
 
         while True:
             try:
