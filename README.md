@@ -12,10 +12,9 @@ A less annoying serial terminal written in Python3
 
 ### Introduction
 Nobody likes to use the arduino IDE, but it functions well for uploading code to your MCU.  
-Now it's slightly easier to use your favorite editor, keeping a serial monitor open and  
-uploading code without manualy exiting serial monitor to free up serial port for code upload.
-
-eg:
+One problem I experienced while using my favorite editor, was that you have to exit the serial  
+monitor to free the serial port so code can be uploaded.
+SerialKiller is a serial monitor that can be externally signaled to free up the serial port.
 ```
 # This example will free up serial, upload code and connect to serial again.
 $ sk -l && arduino --upload my_super_awesome_project.ino && sk -u
@@ -38,8 +37,8 @@ $ sk -U socket://localhost:23
 $ cat test.gcode | sk -c ok -T 5
 
 # Read from STDIN line by line and send over serial.
-# wait 5 seconds before sending next line
-$ cat test.gcode | sk -c ok -T 5
+# wait n seconds before sending next line
+$ cat test.gcode | sk -c ok -w 5
 
 # Free up (lock) serial port of running sk instance
 $ sk -l
