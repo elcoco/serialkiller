@@ -286,8 +286,8 @@ class InputSTDIN(InputBaseClass):
         # wait till we get the expected response, timeout if not
         while msg != confirm_str:
             if (datetime.datetime.now() - t) > datetime.timedelta(seconds=timeout):
-                logger.debug("Message timed out")
-                break
+                logger.error("Message timed out")
+                return
             if not self.reader_thread.q.empty():
                 msg = self.reader_thread.q.get()
         return msg
@@ -302,12 +302,13 @@ class InputSTDIN(InputBaseClass):
         while not self.reader_thread.q.empty():
             self.reader_thread.q.get()
 
-        for l in sys.stdin:
+        for c,l in enumerate(sys.stdin):
             l = l.rstrip('\n')
+
             if not l:
                 continue
 
-            print(self.colorize('< STDIN', 'blue'), l)
+            print(self.colorize(f"< [{c}]", "bblue"), l)
             self.send_data(l)
 
             # wait for response, either by response string or wait time
