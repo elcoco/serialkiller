@@ -408,6 +408,7 @@ class SerialKiller(LockFile, Helper):
     def run(self):
         self.parse_args()
 
+        # check if user wants to free up serial port
         if self.do_lock:
             self.lock()
             return
@@ -418,8 +419,7 @@ class SerialKiller(LockFile, Helper):
 
         self.start_threads()
 
-
-        # check connection, exit if fail
+        # make connection, exit on fail
         if self.url:
             if not self.conn_manager_thread.connect_TCP(self.url, self.timeout):
                 self.stop_threads()
@@ -431,18 +431,18 @@ class SerialKiller(LockFile, Helper):
 
         # create object to get input from user or stdin
         if not os.isatty(sys.stdin.fileno()):
-            ic = InputSTDIN(self.conn_manager_thread, \
-                            self.reader_thread, \
-                            self.history_path, \
-                            self.confirm_str, \
-                            self.confirm_timeout, \
+            ic = InputSTDIN(self.conn_manager_thread,
+                            self.reader_thread,
+                            self.history_path,
+                            self.confirm_str,
+                            self.confirm_timeout,
                             self.confirm_wait)
         else:
-            ic = InputUser(self.conn_manager_thread, \
-                           self.reader_thread, \
+            ic = InputUser(self.conn_manager_thread,
+                           self.reader_thread,
                             self.history_path)
 
-        # get input from source and send over serial
+        # enter input loop
         try:
             ic.get_input()
         except KeyboardInterrupt:
