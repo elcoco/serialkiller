@@ -4,6 +4,7 @@ A less annoying serial terminal written in Python3
 
 ### Features
 - send and receive data over serial port or serial over TCP
+- read data from pipe and send over serial, wait for confirmation string
 - **temporary free up port** to upload code by using an external command
 - **log data** to file
 - **autodetect** serial port
@@ -29,6 +30,15 @@ $ sk -p /dev/ttyUSB0 -b 9600
 
 # Specify url to connect over eg telnet
 $ sk -U socket://localhost:23
+
+# Read from STDIN line by line and send over serial.
+# Wait for string 'ok' before sending next line.
+# This is handy for when you want to send gcode to GRBL CNC firmware.
+$ cat test.gcode | sk -c ok -T 5
+
+# Read from STDIN line by line and send over serial.
+# wait 5 seconds before sending next line
+$ cat test.gcode | sk -c ok -T 5
 
 # Free up (lock) serial port of running sk instance
 $ sk -l
