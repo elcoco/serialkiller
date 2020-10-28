@@ -10,6 +10,7 @@ A less annoying serial terminal written in Python3
 - **autodetect** serial port
 - readline **history** with ↑↓
 
+### Introduction
 Nobody likes to use the arduino IDE, but it functions well for uploading code to your MCU.  
 Now it's slightly easier to use your favorite editor, keeping a serial monitor open and  
 uploading code without manualy exiting serial monitor to free up serial port for code upload.
