@@ -280,6 +280,27 @@ class SerialKiller(LockFile, Helper):
         self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
         self.reader_thread.start()
 
+    def read_input(self):
+        while True:
+            data =  input()
+            readline.write_history_file(self.history_path)
+
+            if data:
+                self.send_data(data)
+
+    def read_pipe(self):
+        for l in sys.stdin:
+            l = l.rstrip('\n')
+            logger.debug(l)
+            time.sleep(0.5)
+
+        logger.debug("STDIN buffer empty")
+
+    def send_data(self, data):
+        self.reader_thread.pause(True)
+        self.conn_manager_thread.send(data + '\n')
+        self.reader_thread.pause(False)
+        print(self.colorize('>', 'bmagenta'), data)
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
@@ -291,6 +312,7 @@ class SerialKiller(LockFile, Helper):
         parser.add_argument('-P', '--log_dir',     help="specify log dir", default=os.path.expanduser('~'))
         parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
         parser.add_argument('-u', '--unlock',      help="reconnect to serial", action='store_true')
+        parser.add_argument('-c', '--confirm_chr', help="wait for this char before sending next, when in listening to STDIN", action='store_true')
         parser.add_argument('-d', '--debug',       help="enable debugging", action='store_true')
         args = parser.parse_args()
 
@@ -303,6 +325,7 @@ class SerialKiller(LockFile, Helper):
         self.do_unlock = args.unlock
         self.do_log = args.log
         self.log_dir = args.log_dir
+        self.confirm_chr = args.confirm_chr
 
         if args.debug:
             logger.setLevel(logging.DEBUG)
@@ -347,6 +370,8 @@ class SerialKiller(LockFile, Helper):
 
         self.start_threads()
 
+
+        # check connection, exit if fail
         if self.url:
             if not self.conn_manager_thread.connect_TCP(self.url, self.timeout):
                 self.stop_threads()
@@ -357,18 +382,19 @@ class SerialKiller(LockFile, Helper):
                 self.stop_threads()
                 return
 
+        try:
+            # STDIN piped mode, check if we're being piped to
+            if not os.isatty(sys.stdin.fileno()):
+                self.read_pipe()
+            else:
+                self.read_input()
 
-        while True:
-            try:
-                data = self.read_input()
-                if data:
-                    self.send_data(data)
-            except KeyboardInterrupt:
-                break
+        except KeyboardInterrupt:
+            pass
 
-            except serial.serialutil.SerialException as e:
-                logger.error(e)
-                break
+        except serial.serialutil.SerialException as e:
+            logger.error(e)
+            pass
 
         self.stop_threads()
 
