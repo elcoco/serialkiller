@@ -7,6 +7,7 @@ import argparse
 import readline     # interactive mode history at input()
 import datetime
 import logging
+import queue
 
 import serial
 from serial.tools.list_ports import comports
@@ -186,6 +187,9 @@ class ReaderThread(threading.Thread, LockFile, Helper):
         self.paused = False
         self.log_file_path = log_file_path
 
+        # queue holds received messages that we can process by other threads
+        self.q = queue.Queue()
+
     def stop(self):
         logger.debug("Stopping reader thread")
         self.stopped = True
@@ -227,16 +231,25 @@ class ReaderThread(threading.Thread, LockFile, Helper):
 
             if data == None:
                 continue
+
             data = self.sanitize(data)
+
             if data:
+                # append to queue so we can process messages from other threads
+                self.q.put(data)
+
                 print(self.colorize('<', 'bgreen'), data)
+
+                # log to file
                 if self.log_file_path:
                     self.write_to_log_file(data)
 
 
-class InputBaseClass():
-    def __init__(self, reader_thread):
+class InputBaseClass(Helper):
+    def __init__(self, conn_manager_thread, reader_thread, history_path):
         self.reader_thread = reader_thread
+        self.conn_manager_thread = conn_manager_thread
+        self.history_path = history_path
 
     def send_data(self, data):
         self.reader_thread.pause(True)
@@ -245,16 +258,65 @@ class InputBaseClass():
         print(self.colorize('>', 'bmagenta'), data)
 
 
+class InputUser(InputBaseClass):
+    def __init__(self, conn_manager_thread, reader_thread, history_path):
+        super().__init__(conn_manager_thread, reader_thread, history_path)
+
+    def get_input(self):
+        logger.debug("Starting reading from user input")
+        while True:
+            data =  input()
+            readline.write_history_file(self.history_path)
+
+            if data:
+                self.send_data(data)
+
+
 class InputSTDIN(InputBaseClass):
-    def __init__(self):
-        Super.__init__(self)
+    def __init__(self, conn_manager_thread, reader_thread, history_path, confirm_str, confirm_timeout, confirm_wait):
+        super().__init__(conn_manager_thread, reader_thread, history_path)
+        self.confirm_str = confirm_str
+        self.confirm_timeout = confirm_timeout
+        self.confirm_wait = confirm_wait
 
-    def read_input(self):
-        data =  input()
-        readline.write_history_file(self.history_path)
-        return data
+    def wait_for_str(self, confirm_str, timeout=5):
+        msg = ''
+        t = datetime.datetime.now()
 
+        # wait till we get the expected response, timeout if not
+        while msg != confirm_str:
+            if (datetime.datetime.now() - t) > datetime.timedelta(seconds=timeout):
+                logger.debug("Message timed out")
+                break
+            if not self.reader_thread.q.empty():
+                msg = self.reader_thread.q.get()
+        return msg
 
+    def get_input(self):
+        if self.confirm_str:
+            logger.info(f"Starting reading from STDIN, string={self.confirm_str}, timeout={self.confirm_timeout} sec")
+        else:
+            logger.info(f"Starting reading from STDIN, wait={self.confirm_wait} sec")
+
+        # fast forward, empty queue
+        while not self.reader_thread.q.empty():
+            self.reader_thread.q.get()
+
+        for l in sys.stdin:
+            l = l.rstrip('\n')
+            if not l:
+                continue
+
+            print(self.colorize('< STDIN', 'blue'), l)
+            self.send_data(l)
+
+            # wait for response, either by response string or wait time
+            if self.confirm_str:
+                self.wait_for_str(self.confirm_str, self.confirm_timeout)
+            else:
+                time.sleep(self.confirm_wait)
+
+        logger.debug("STDIN buffer empty")
 
 
 class SerialKiller(LockFile, Helper):
@@ -280,28 +342,6 @@ class SerialKiller(LockFile, Helper):
         self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
         self.reader_thread.start()
 
-    def read_input(self):
-        while True:
-            data =  input()
-            readline.write_history_file(self.history_path)
-
-            if data:
-                self.send_data(data)
-
-    def read_pipe(self):
-        for l in sys.stdin:
-            l = l.rstrip('\n')
-            logger.debug(l)
-            time.sleep(0.5)
-
-        logger.debug("STDIN buffer empty")
-
-    def send_data(self, data):
-        self.reader_thread.pause(True)
-        self.conn_manager_thread.send(data + '\n')
-        self.reader_thread.pause(False)
-        print(self.colorize('>', 'bmagenta'), data)
-
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
         parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
@@ -312,7 +352,11 @@ class SerialKiller(LockFile, Helper):
         parser.add_argument('-P', '--log_dir',     help="specify log dir", default=os.path.expanduser('~'))
         parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
         parser.add_argument('-u', '--unlock',      help="reconnect to serial", action='store_true')
-        parser.add_argument('-c', '--confirm_chr', help="wait for this char before sending next, when in listening to STDIN", action='store_true')
+
+        parser.add_argument('-c', '--confirm_str', help="wait for this string before sending next message, when listening to STDIN", metavar='STR', default=None)
+        parser.add_argument('-T', '--confirm_timeout', help="seconds before timeout when waiting for response, when listening to STDIN", metavar='TIMEOUT', default=5)
+        parser.add_argument('-w', '--confirm_wait', help="wait time before sending next message, when listening to STDIN", metavar='TIME', default=1)
+
         parser.add_argument('-d', '--debug',       help="enable debugging", action='store_true')
         args = parser.parse_args()
 
@@ -325,7 +369,10 @@ class SerialKiller(LockFile, Helper):
         self.do_unlock = args.unlock
         self.do_log = args.log
         self.log_dir = args.log_dir
-        self.confirm_chr = args.confirm_chr
+
+        self.confirm_str = args.confirm_str
+        self.confirm_timeout = int(args.confirm_timeout)
+        self.confirm_wait = int(args.confirm_wait)
 
         if args.debug:
             logger.setLevel(logging.DEBUG)
@@ -376,22 +423,30 @@ class SerialKiller(LockFile, Helper):
             if not self.conn_manager_thread.connect_TCP(self.url, self.timeout):
                 self.stop_threads()
                 return
-            
         else:
             if not self.conn_manager_thread.try_connect_ports(self.ports, self.baudrate, self.timeout):
                 self.stop_threads()
                 return
 
+        # create object to get input from user or stdin
+        if not os.isatty(sys.stdin.fileno()):
+            ic = InputSTDIN(self.conn_manager_thread, \
+                            self.reader_thread, \
+                            self.history_path, \
+                            self.confirm_str, \
+                            self.confirm_timeout, \
+                            self.confirm_wait)
+        else:
+            ic = InputUser(self.conn_manager_thread, \
+                           self.reader_thread, \
+                            self.history_path)
+
+        # get input from source and send over serial
         try:
-            # STDIN piped mode, check if we're being piped to
-            if not os.isatty(sys.stdin.fileno()):
-                self.read_pipe()
-            else:
-                self.read_input()
-
+            ic.get_input()
         except KeyboardInterrupt:
+            logger.debug("Received keyboard interrupt")
             pass
-
         except serial.serialutil.SerialException as e:
             logger.error(e)
             pass
