@@ -13,8 +13,8 @@ A less annoying serial terminal written in Python3
 ### Introduction
 Nobody likes to use the arduino IDE, but it functions well for uploading code to your MCU.  
 One problem I experienced while using my favorite editor, was that you have to exit the serial  
-monitor to free the serial port so code can be uploaded.
-SerialKiller is a serial monitor that can be externally signaled to free up the serial port.
+monitor to free the serial port, so code can be uploaded.  
+SerialKiller is a serial monitor that can be externally signaled to free up the serial port.  
 ```
 # This example will free up serial, upload code and connect to serial again.
 $ sk -l && arduino --upload my_super_awesome_project.ino && sk -u
