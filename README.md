@@ -37,7 +37,7 @@ $ cat test.gcode | sk -S ok -T 5
 
 # Read from STDIN line by line and send over serial.
 # wait n seconds before sending next line
-$ cat test.gcode | sk -S ok -W 5
+$ cat test.gcode | sk -W 5
 
 # Free up (lock) serial port of running sk instance
 $ sk -l
