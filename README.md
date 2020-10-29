@@ -58,7 +58,7 @@ nnoremap <C-a> :w<CR>:!sk -l ; arduino --upload % ; sk -u<CR>
 ### Help
 ```
 laptop ~/dev/serialkiller master > sk --help
-usage: sk [-h] [-p PORT] [-b RATE] [-U URL] [-t TIMEOUT] [-L] [-P LOG_DIR] [-l] [-u] [-S STR] [-T TIMEOUT] [-W TIME] [-d]
+usage: sk [-h] [-p PORT] [-b RATE] [-U URL] [-t SEC] [-L] [-P DIR] [-l] [-u] [-S STR] [-T SEC] [-W SEC] [-d]
 
 SerialKiller does serial things.
 
@@ -68,17 +68,17 @@ optional arguments:
   -b RATE, --baudrate RATE
                         default: 115200
   -U URL, --url URL     url eg: socket://host:port
-  -t TIMEOUT, --timeout TIMEOUT
+  -t SEC, --timeout SEC
                         default: 0
   -L, --log             log data to file
-  -P LOG_DIR, --log_dir LOG_DIR
+  -P DIR, --log_dir DIR
                         specify log dir
   -l, --lock            free serial port
   -u, --unlock          reconnect to serial
   -S STR, --confirm_str STR
                         wait for this string before sending next message, when listening to STDIN
-  -T TIMEOUT, --confirm_timeout TIMEOUT
+  -T SEC, --confirm_timeout SEC
                         seconds before timeout when waiting for response, when listening to STDIN
-  -W TIME, --confirm_wait TIME
+  -W SEC, --confirm_wait SEC
                         wait time before sending next message, when listening to STDIN
   -d, --debug           enable debugging
