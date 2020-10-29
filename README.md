@@ -27,17 +27,17 @@ $ sk
 # Specify port and baudrate
 $ sk -p /dev/ttyUSB0 -b 9600
 
-# Specify url to connect over eg telnet
+# Specify url to connect over eg. telnet
 $ sk -U socket://localhost:23
 
 # Read from STDIN line by line and send over serial.
 # Wait for string 'ok' before sending next line.
 # This is handy for when you want to send gcode to GRBL CNC firmware.
-$ cat test.gcode | sk -c ok -T 5
+$ cat test.gcode | sk -S ok -T 5
 
 # Read from STDIN line by line and send over serial.
 # wait n seconds before sending next line
-$ cat test.gcode | sk -c ok -w 5
+$ cat test.gcode | sk -S ok -W 5
 
 # Free up (lock) serial port of running sk instance
 $ sk -l
@@ -58,8 +58,7 @@ nnoremap <C-a> :w<CR>:!sk -l ; arduino --upload % ; sk -u<CR>
 ### Help
 ```
 laptop ~/dev/serialkiller master > sk --help
-usage: sk [-h] [-p PORT] [-b RATE] [-U URL] [-t TIMEOUT] [-L] [-P LOG_DIR] [-l] [-u] [-c STR]
-          [-T TIMEOUT] [-w TIME] [-d]
+usage: sk [-h] [-p PORT] [-b RATE] [-U URL] [-t TIMEOUT] [-L] [-P LOG_DIR] [-l] [-u] [-S STR] [-T TIMEOUT] [-W TIME] [-d]
 
 SerialKiller does serial things.
 
@@ -76,11 +75,10 @@ optional arguments:
                         specify log dir
   -l, --lock            free serial port
   -u, --unlock          reconnect to serial
-  -c STR, --confirm_str STR
+  -S STR, --confirm_str STR
                         wait for this string before sending next message, when listening to STDIN
   -T TIMEOUT, --confirm_timeout TIMEOUT
                         seconds before timeout when waiting for response, when listening to STDIN
-  -w TIME, --confirm_wait TIME
+  -W TIME, --confirm_wait TIME
                         wait time before sending next message, when listening to STDIN
   -d, --debug           enable debugging
-  ```

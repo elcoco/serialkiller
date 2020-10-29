@@ -13,7 +13,7 @@ import serial
 from serial.tools.list_ports import comports
 
 
-# TODO log to file
+# TODO lock/unlock is probably not the best terminology
 
 formatter_info = logging.Formatter('%(message)s')
 formatter_debug = logging.Formatter('%(levelname)5s %(module)3s.%(funcName)-10s %(lineno)3s %(message)s')
@@ -354,9 +354,9 @@ class SerialKiller(LockFile, Helper):
         parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
         parser.add_argument('-u', '--unlock',      help="reconnect to serial", action='store_true')
 
-        parser.add_argument('-c', '--confirm_str', help="wait for this string before sending next message, when listening to STDIN", metavar='STR', default=None)
+        parser.add_argument('-S', '--confirm_str', help="wait for this string before sending next message, when listening to STDIN", metavar='STR', default=None)
         parser.add_argument('-T', '--confirm_timeout', help="seconds before timeout when waiting for response, when listening to STDIN", metavar='TIMEOUT', default=5)
-        parser.add_argument('-w', '--confirm_wait', help="wait time before sending next message, when listening to STDIN", metavar='TIME', default=1)
+        parser.add_argument('-W', '--confirm_wait', help="wait time before sending next message, when listening to STDIN", metavar='TIME', default=1)
 
         parser.add_argument('-d', '--debug',       help="enable debugging", action='store_true')
         args = parser.parse_args()
