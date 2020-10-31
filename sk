@@ -51,6 +51,9 @@ class Helper():
 
 
 class LockFile():
+    """ Implements a lock by watching a file. If file exists, disconnect all traffic over serial port to free it up
+        for another process to use. Reconnect when file is deleted.
+    """
     def __init__(self, path):
         self.lockfile = path
 
@@ -71,6 +74,14 @@ class LockFile():
 
 
 class SerialConnThread(threading.Thread, LockFile):
+    """ Handles all things that have something to do with the serial connection.
+        Since serial connection can either send or receive, not both at the same time,
+          a set_lock_recv() signal must be send, that frees up serial connection for sending.
+        Another lock is implemented that locks both sending and receiving. (--lock|--unlock) It can be triggered
+          by an external command and frees up the serial port for another process to use.
+          This can be beneficial when, for example, the user wants to upload new code to an MCU
+          while keeping an eye on the serial monitor.
+    """
     def __init__(self, lockfile):
         threading.Thread.__init__(self)
         LockFile.__init__(self, lockfile)
@@ -84,6 +95,9 @@ class SerialConnThread(threading.Thread, LockFile):
 
         # holds serial connection object
         self.ser = None
+
+        # indicates whether we are allowed to receive, to free up port for sending
+        self.lock_recv = False
 
     def connect_TCP(self, url, timeout=0):
         # Create connection over TCP
@@ -118,17 +132,25 @@ class SerialConnThread(threading.Thread, LockFile):
         else:
             logger.error("No serial ports found")
 
+    def set_lock_recv(self, state):
+        # set lock to free up port for sending (see docstring)
+        self.lock_recv = state
+
     def stop(self):
         logger.debug("Stopping connection manager thread")
         self.stopped = True
 
-    def get_char(self):
-        # TODO handle pause on this level
+    def recv_chr(self):
+        # receive a single character
         if self.ser == None:
             return
         if not self.ser.is_open:
             return
         if self.is_locked():
+            return
+
+        # check if we are allowed to receive, this is done to free up port for sending
+        if self.lock_recv:
             return
 
         try:
@@ -138,14 +160,16 @@ class SerialConnThread(threading.Thread, LockFile):
             logger.error(f"Wrong baudrate? {self.baudrate}")
 
     def send(self, data):
-        # TODO handle pause on this level
+        # send a line
         if self.ser == None:
             return
         if self.is_locked():
             logger.error("Serial is locked")
             return
 
+        self.set_lock_recv(True)
         self.ser.write(data.encode())
+        self.set_lock_recv(False)
 
     def close(self):
         if self.ser != None:
@@ -179,35 +203,29 @@ class SerialConnThread(threading.Thread, LockFile):
 
 
 class ReaderThread(threading.Thread, LockFile, Helper):
+    """ Reads data from the connection an prints it to STDOUT and optionally to a file """
     def __init__(self, lockfile, conn_manager, log_file_path):
         threading.Thread.__init__(self)
         LockFile.__init__(self, lockfile)
         self.stopped = False
         self.conn_manager = conn_manager
-        self.paused = False
         self.log_file_path = log_file_path
 
-        # queue holds received messages that we can process by other threads
+        # queue holds received messages that can be processed by other threads
         self.q = queue.Queue()
 
     def stop(self):
         logger.debug("Stopping reader thread")
         self.stopped = True
 
-    def pause(self, state):
-        self.paused = state
-
     def sanitize(self, data):
         return data.strip()
 
-    def non_blocking_read(self):
+    def non_blocking_recv(self):
         buf = ''
         while not self.stopped:
 
-            if self.paused:
-                continue
-
-            c = self.conn_manager.get_char()
+            c = self.conn_manager.recv_chr()
 
             if not c:
                 continue
@@ -225,7 +243,7 @@ class ReaderThread(threading.Thread, LockFile, Helper):
         while not self.stopped:
 
             try:
-                data = self.non_blocking_read()
+                data = self.non_blocking_recv()
             except serial.serialutil.SerialException as e:
                 continue
 
@@ -246,19 +264,19 @@ class ReaderThread(threading.Thread, LockFile, Helper):
 
 
 class InputBaseClass(Helper):
+    """ Handles the way data is retrieved from either user, STDIN or whatever before it is sent over the serial connection """
     def __init__(self, conn_manager_thread, reader_thread, history_path):
         self.reader_thread = reader_thread
         self.conn_manager_thread = conn_manager_thread
         self.history_path = history_path
 
     def send_data(self, data):
-        self.reader_thread.pause(True)
         self.conn_manager_thread.send(data + '\n')
-        self.reader_thread.pause(False)
         print(self.colorize('>', 'bmagenta'), data)
 
 
 class InputUser(InputBaseClass):
+    """ Handles user input """
     def __init__(self, conn_manager_thread, reader_thread, history_path):
         super().__init__(conn_manager_thread, reader_thread, history_path)
 
@@ -273,6 +291,7 @@ class InputUser(InputBaseClass):
 
 
 class InputSTDIN(InputBaseClass):
+    """ Handles input over STDIN (pipe) """
     def __init__(self, conn_manager_thread, reader_thread, history_path, confirm_str, confirm_timeout, confirm_wait):
         super().__init__(conn_manager_thread, reader_thread, history_path)
         self.confirm_str = confirm_str
@@ -321,6 +340,7 @@ class InputSTDIN(InputBaseClass):
 
 
 class SerialKiller(LockFile, Helper):
+    """ Main application class, starts/stops connection and reader threads and enters an input loop """
     def __init__(self):
         self.lockfile = '/tmp/serialkiller.lock'
         LockFile.__init__(self, self.lockfile)
