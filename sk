@@ -12,9 +12,6 @@ import queue
 import serial
 from serial.tools.list_ports import comports
 
-
-# TODO lock/unlock is probably not the best terminology
-
 formatter_info = logging.Formatter('%(message)s')
 formatter_debug = logging.Formatter('%(levelname)5s %(module)3s.%(funcName)-10s %(lineno)3s %(message)s')
 
@@ -25,7 +22,8 @@ streamhandler = logging.StreamHandler(sys.stdout)
 streamhandler.setLevel(logging.DEBUG)
 logger.addHandler(streamhandler)
 
-class Helper():
+
+class Color():
     def colorize(self, string, color):
         colors = {}
         colors['black']    = '\033[0;30m'
@@ -197,12 +195,10 @@ class SerialConnThread(threading.Thread, LockFile):
                         self.connect_TCP(self.url, self.timeout)
                     else:
                         self.connect_serial(self.port, self.baudrate, self.timeout)
-
-
         self.close()
 
 
-class ReaderThread(threading.Thread, LockFile, Helper):
+class ReaderThread(threading.Thread, LockFile, Color):
     """ Reads data from the connection an prints it to STDOUT and optionally to a file """
     def __init__(self, lockfile, conn_manager, log_file_path):
         threading.Thread.__init__(self)
@@ -263,7 +259,7 @@ class ReaderThread(threading.Thread, LockFile, Helper):
                     self.write_to_log_file(data)
 
 
-class InputBaseClass(Helper):
+class InputBaseClass(Color):
     """ Handles the way data is retrieved from either user, STDIN or whatever before it is sent over the serial connection """
     def __init__(self, conn_manager_thread, reader_thread, history_path):
         self.reader_thread = reader_thread
@@ -339,7 +335,7 @@ class InputSTDIN(InputBaseClass):
         logger.debug("STDIN buffer empty")
 
 
-class SerialKiller(LockFile, Helper):
+class SerialKiller(LockFile):
     """ Main application class, starts/stops connection and reader threads and enters an input loop """
     def __init__(self):
         self.lockfile = '/tmp/serialkiller.lock'
