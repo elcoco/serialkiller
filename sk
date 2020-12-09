@@ -195,6 +195,7 @@ class SerialConnThread(threading.Thread, LockFile):
                         self.connect_TCP(self.url, self.timeout)
                     else:
                         self.connect_serial(self.port, self.baudrate, self.timeout)
+            time.sleep(0.01)
         self.close()
 
 
