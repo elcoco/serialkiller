@@ -221,10 +221,11 @@ class ReaderThread(threading.Thread, LockFile, Color):
     def non_blocking_recv(self):
         buf = ''
         while not self.stopped:
-
             c = self.conn_manager.recv_chr()
 
             if not c:
+                # sleep when no data is received so CPU doesn't spike
+                time.sleep(0.01)
                 continue
             elif c == '\n':
                 return buf
