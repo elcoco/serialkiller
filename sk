@@ -243,6 +243,8 @@ class ReaderThread(threading.Thread, LockFile, Color):
             try:
                 data = self.non_blocking_recv()
             except serial.serialutil.SerialException as e:
+                logger.error("Lost connection")
+                self.stop()
                 continue
 
             if data == None:
@@ -281,7 +283,7 @@ class InputUser(InputBaseClass):
     def get_input(self):
         logger.debug("Starting reading from user input")
         while True:
-            data =  input()
+            data = input()
             readline.write_history_file(self.history_path)
 
             if data:
