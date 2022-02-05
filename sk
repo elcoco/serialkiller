@@ -8,6 +8,7 @@ import readline     # interactive mode history at input()
 import datetime
 import logging
 import queue
+from pathlib import Path
 
 import serial
 from serial.tools.list_ports import comports
@@ -21,6 +22,9 @@ logger.setLevel(logging.DEBUG)
 streamhandler = logging.StreamHandler(sys.stdout)
 streamhandler.setLevel(logging.DEBUG)
 logger.addHandler(streamhandler)
+
+LOCK_PATH = '/tmp/serialkiller.lock'
+HISTORY_PATH = '/tmp/sk_history.txt'
 
 
 class Color():
@@ -52,22 +56,21 @@ class LockFile():
     """ Implements a lock by watching a file. If file exists, disconnect all traffic over serial port to free it up
         for another process to use. Reconnect when file is deleted.
     """
-    def __init__(self, path):
+    def __init__(self, path: Path):
         self.lockfile = path
 
     def is_locked(self):
-        return os.path.isfile(self.lockfile)
+        return self.lockfile.is_file()
 
     def lock(self):
-        with open(self.lockfile, 'w'):
-            pass
+        self.lockfile.touch()
         logger.info(f"Created lockfile: {self.lockfile}")
 
     def unlock(self):
-        try:
-            os.remove(self.lockfile)
+        if self.lockfile.is_file():
+            self.lockfile.unlink()
             logger.info(f"Removed lockfile: {self.lockfile}")
-        except FileNotFoundError:
+        else:
             logger.error('Serialkiller is not locked')
 
 
@@ -82,7 +85,7 @@ class SerialConnThread(threading.Thread, LockFile):
     """
     def __init__(self, lockfile):
         threading.Thread.__init__(self)
-        LockFile.__init__(self, lockfile)
+        LockFile.__init__(self, Path(lockfile))
         self.stopped = False
 
         # connection info, is filled in by connect()
@@ -97,10 +100,10 @@ class SerialConnThread(threading.Thread, LockFile):
         # indicates whether we are allowed to receive, to free up port for sending
         self.lock_recv = False
 
-    def connect_TCP(self, url, timeout=0):
+    def connect_TCP(self, url, timeout=1):
         # Create connection over TCP
         try:
-            self.ser =  serial.serial_for_url(url, timeout=1)
+            self.ser =  serial.serial_for_url(url, timeout=timeout)
             logger.info(f"Connected to {url} | Exit using CTRL+C")
             self.url = url
             return self.ser
@@ -203,7 +206,7 @@ class ReaderThread(threading.Thread, LockFile, Color):
     """ Reads data from the connection an prints it to STDOUT and optionally to a file """
     def __init__(self, lockfile, conn_manager, log_file_path):
         threading.Thread.__init__(self)
-        LockFile.__init__(self, lockfile)
+        LockFile.__init__(self, Path(lockfile))
         self.stopped = False
         self.conn_manager = conn_manager
         self.log_file_path = log_file_path
@@ -342,11 +345,11 @@ class InputSTDIN(InputBaseClass):
 class SerialKiller(LockFile):
     """ Main application class, starts/stops connection and reader threads and enters an input loop """
     def __init__(self):
-        self.lockfile = '/tmp/serialkiller.lock'
-        LockFile.__init__(self, self.lockfile)
+        self.lockfile = LOCK_PATH
+        LockFile.__init__(self, Path(self.lockfile))
 
         # readline lib will use this file to read/write history
-        self.history_path = '/tmp/sk_history.txt'
+        self.history_path = HISTORY_PATH
         try:
             readline.read_history_file(self.history_path)
         except FileNotFoundError:
@@ -368,7 +371,7 @@ class SerialKiller(LockFile):
         parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
         parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default=115200)
         parser.add_argument('-U', '--url',         help="url eg: socket://host:port", default=None)
-        parser.add_argument('-t', '--timeout',     help="default: 0", metavar='SEC', default=0)
+        parser.add_argument('-t', '--timeout',     help="default: 1", metavar='SEC', default=1)
         parser.add_argument('-L', '--log',         help="log data to file", action='store_true')
         parser.add_argument('-P', '--log_dir',     help="specify log dir", metavar='DIR', default=os.path.expanduser('~'))
         parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
@@ -467,10 +470,8 @@ class SerialKiller(LockFile):
             ic.get_input()
         except KeyboardInterrupt:
             logger.debug("Received keyboard interrupt")
-            pass
         except serial.serialutil.SerialException as e:
             logger.error(e)
-            pass
 
         self.stop_threads()
 
