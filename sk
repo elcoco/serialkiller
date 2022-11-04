@@ -160,7 +160,8 @@ class SerialConnThread(threading.Thread, LockFile):
             logger.error(e)
             logger.error(f"Wrong baudrate? {self.baudrate}")
         # TODO why is this typeerror check needed when using lock/unlock function???
-        except TypeError:
+        except TypeError as e:
+            logger.error(f"exception in recv_chr() fix this! {e}")
             return
 
     def send(self, data):
