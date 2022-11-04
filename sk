@@ -159,6 +159,9 @@ class SerialConnThread(threading.Thread, LockFile):
         except UnicodeDecodeError as e:
             logger.error(e)
             logger.error(f"Wrong baudrate? {self.baudrate}")
+        # TODO why is this typeerror check needed when using lock/unlock function???
+        except TypeError:
+            return
 
     def send(self, data):
         # send a line
