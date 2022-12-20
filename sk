@@ -82,9 +82,10 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
           This can be beneficial when, for example, the user wants to upload new code to an MCU
           while keeping an eye on the serial monitor.
     """
-    def __init__(self, lockfile, timeout):
+    def __init__(self, rq, wq, timeout):
         threading.Thread.__init__(self)
-        LockFile.__init__(self, Path(lockfile))
+
+        LockFile.__init__(self, Path(LOCK_PATH))
         self.stopped = False
 
         self.timeout = timeout
@@ -92,21 +93,15 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
         # holds serial connection object
         self.ser = None
 
-        # indicates whether we are allowed to receive, to free up port for sending
-        self.lock_recv = False
-
         # it is impossible to detect broken connections so this indicates a reconnection try
         self.needs_reconnect = False
 
-        # put received chars in queue
-        self.chr_q = queue.Queue()
+        # read and write queue
+        self.rq = rq
+        self.wq = wq
 
     def is_alive(self):
         return self.ser != None
-
-    def set_lock_recv(self, state):
-        # set lock to free up port for sending (see docstring)
-        self.lock_recv = state
 
     def stop(self):
         logger.debug("Stopping connection manager thread")
@@ -121,14 +116,10 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
         if self.is_locked():
             return
 
-        # check if we are allowed to receive, this is done to free up port for sending
-        if self.lock_recv:
-            return
-
         try:
             c = self.ser.read().decode()
             if c:
-                self.chr_q.put(c)
+                self.rq.put(c)
                 return c
 
         except UnicodeDecodeError as e:
@@ -137,17 +128,13 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
         except serial.serialutil.SerialException as e:
             self.needs_reconnect = True
 
-    def send(self, data):
-        # send a line
+    def send(self):
+        # send a line from queue
         if self.ser == None:
             return
-        if self.is_locked():
-            logger.error("Serial is locked")
-            return
 
-        self.set_lock_recv(True)
-        self.ser.write(data.encode())
-        self.set_lock_recv(False)
+        while not self.wq.empty():
+            self.ser.write(self.wq.get().encode())
 
     def close(self):
         if self.ser != None:
@@ -155,35 +142,38 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
 
     def run(self):
         logger.debug("Starting connection manager thread")
-        msg_shown = False
 
         while not self.stopped:
             if self.is_locked():
-                if not msg_shown:
-                    logger.info("Serial is locked")
+                if self.ser and self.ser.is_open:
+                    logger.info("Serialkiller is locked")
                     self.close()
-                    msg_shown = True
 
             else:
+                #if self.needs_reconnect or self.ser == None or not self.ser.is_open:
+                #if not self.is_alive():
                 if self.needs_reconnect or self.ser == None or not self.ser.is_open:
                     self.connect()
-                    msg_shown = False
 
-            self.recv_chr()
+                # send messages in queue
+                self.send()
+
+                # receive chars and put in queue
+                self.recv_chr()
+
             time.sleep(0.01)
         self.close()
 
 
 class SerialConnThread(ConnThreadBaseClass):
-    def __init__(self, lockfile, ports, baudrate, timeout):
-        ConnThreadBaseClass.__init__(self, lockfile, timeout)
+    def __init__(self, rq, wq, ports, baudrate, timeout):
+        ConnThreadBaseClass.__init__(self, rq, wq, timeout)
 
         self.ports = ports
         self.baudrate = baudrate
 
         # this will be the port after successfull first connection
         self.port = None
-
 
     def connect_serial(self, port, show_error=True):
         # Create connection over Serial port
@@ -225,10 +215,9 @@ class SerialConnThread(ConnThreadBaseClass):
             self.stopped = True
 
 
-
 class TCPConnThread(ConnThreadBaseClass):
-    def __init__(self, lockfile):
-        ConnThreadBaseClass.__init__(self, lockfile)
+    def __init__(self):
+        ConnThreadBaseClass.__init__()
 
         self.url = None
 
@@ -243,14 +232,13 @@ class TCPConnThread(ConnThreadBaseClass):
             logger.error(e)
 
 
-class ReaderThread(threading.Thread, LockFile, Color):
+class ReaderThread(threading.Thread, Color):
     """ Reads data from the connection an prints it to STDOUT and optionally to a file """
-    def __init__(self, lockfile, conn_manager, log_file_path):
+    def __init__(self, rq, log_file_path):
         threading.Thread.__init__(self)
-        LockFile.__init__(self, Path(lockfile))
         self.stopped = False
-        self.conn_manager = conn_manager
         self.log_file_path = log_file_path
+        self.rq = rq
 
     def stop(self):
         logger.debug("Stopping reader thread")
@@ -269,9 +257,9 @@ class ReaderThread(threading.Thread, LockFile, Color):
 
         while not self.stopped:
 
-            while not self.conn_manager.chr_q.empty():
+            while not self.rq.empty():
 
-                c = self.conn_manager.chr_q.get()
+                c = self.rq.get()
 
                 if c == None:
                     continue
@@ -297,22 +285,18 @@ class ReaderThread(threading.Thread, LockFile, Color):
             time.sleep(0.1)
 
 
-class InputBaseClass(Color):
+class InputBaseClass(Color, LockFile):
     """ Handles the way data is retrieved from either user, STDIN or whatever before it is sent over the serial connection """
-    def __init__(self, conn_manager_thread, reader_thread, history_path):
-        self.reader_thread = reader_thread
-        self.conn_manager_thread = conn_manager_thread
+    def __init__(self, wq, history_path):
+        LockFile.__init__(self, Path(LOCK_PATH))
         self.history_path = history_path
-
-    def send_data(self, data):
-        self.conn_manager_thread.send(data + '\n')
-        print(self.colorize('>', 'bmagenta'), data)
+        self.wq = wq
 
 
 class InputUser(InputBaseClass):
     """ Handles user input """
-    def __init__(self, conn_manager_thread, reader_thread, history_path):
-        super().__init__(conn_manager_thread, reader_thread, history_path)
+    def __init__(self, wq, history_path):
+        super().__init__(wq, history_path)
 
     def get_input(self):
         logger.debug("Starting reading from user input")
@@ -320,8 +304,9 @@ class InputUser(InputBaseClass):
             data = input()
             readline.write_history_file(self.history_path)
 
-            if data:
-                self.send_data(data)
+            if data and not self.is_locked():
+                self.wq.put(data)
+                print(self.colorize('>', 'bmagenta'), data)
 
 
 class InputSTDIN(InputBaseClass):
@@ -372,8 +357,7 @@ class InputSTDIN(InputBaseClass):
 class SerialKiller(LockFile):
     """ Main application class, starts/stops connection and reader threads and enters an input loop """
     def __init__(self):
-        self.lockfile = LOCK_PATH
-        LockFile.__init__(self, Path(self.lockfile))
+        LockFile.__init__(self, Path(LOCK_PATH))
 
         # readline lib will use this file to read/write history
         self.history_path = HISTORY_PATH
@@ -382,21 +366,26 @@ class SerialKiller(LockFile):
         except FileNotFoundError:
             pass
 
+        self.rq = queue.Queue()
+        self.wq = queue.Queue()
+
     def start_threads(self):
         # make connection, exit on fail
         if self.url:
-            self.conn_manager_thread = TCPConnThread(self.lockfile)
+            self.conn_manager_thread = TCPConnThread(self.rq, self.wq)
             self.conn_manager_thread.start()
         else:
-            self.conn_manager_thread = SerialConnThread(self.lockfile, self.ports, self.baudrate, self.timeout)
+            self.conn_manager_thread = SerialConnThread(self.rq, self.wq, self.ports, self.baudrate, self.timeout)
             self.conn_manager_thread.start()
 
-        self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
+        self.reader_thread = ReaderThread(self.rq, self.log_file_path)
         self.reader_thread.start()
 
     def stop_threads(self):
         self.reader_thread.stop()
         self.conn_manager_thread.stop()
+        self.reader_thread.join()
+        self.conn_manager_thread.join()
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
@@ -461,6 +450,7 @@ class SerialKiller(LockFile):
             self.log_file_path = None
 
     def wait_for_connection(self, thread):
+        """ Loop until connection is confirmed or thread is stopped """
         while not thread.stopped:
             if thread.is_alive():
                 return True
@@ -477,6 +467,11 @@ class SerialKiller(LockFile):
             self.unlock()
             return
 
+        if self.is_locked():
+            logger.info("Serialkiller is locked, use --unlock")
+            while self.is_locked():
+                pass
+
         self.start_threads()
 
         # wait for initial connection. exit on fail
@@ -487,14 +482,15 @@ class SerialKiller(LockFile):
         # create object to get input from user or stdin
         if not os.isatty(sys.stdin.fileno()):
             ic = InputSTDIN(self.conn_manager_thread,
-                            self.reader_thread,
+                            self.wq,
+                            #self.reader_thread,
                             self.history_path,
                             self.confirm_str,
                             self.confirm_timeout,
                             self.confirm_wait)
         else:
-            ic = InputUser(self.conn_manager_thread,
-                           self.reader_thread,
+            ic = InputUser( self.wq,
+                            #self.reader_thread,
                             self.history_path)
 
         # enter input loop
