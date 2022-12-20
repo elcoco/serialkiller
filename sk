@@ -73,8 +73,7 @@ class LockFile():
         else:
             logger.error('Serialkiller is not locked')
 
-
-class SerialConnThread(threading.Thread, LockFile):
+class ConnThreadBaseClass(threading.Thread, LockFile):
     """ Handles all things that have something to do with the serial connection.
         Since serial connection can either send or receive, not both at the same time,
           a set_lock_recv() signal must be send, that frees up serial connection for sending.
@@ -83,16 +82,12 @@ class SerialConnThread(threading.Thread, LockFile):
           This can be beneficial when, for example, the user wants to upload new code to an MCU
           while keeping an eye on the serial monitor.
     """
-    def __init__(self, lockfile):
+    def __init__(self, lockfile, timeout):
         threading.Thread.__init__(self)
         LockFile.__init__(self, Path(lockfile))
         self.stopped = False
 
-        # connection info, is filled in by connect()
-        self.ports = None
-        self.baudrate = None
-        self.timeout = None
-        self.url = None
+        self.timeout = timeout
 
         # holds serial connection object
         self.ser = None
@@ -100,38 +95,14 @@ class SerialConnThread(threading.Thread, LockFile):
         # indicates whether we are allowed to receive, to free up port for sending
         self.lock_recv = False
 
-    def connect_TCP(self, url, timeout=1):
-        # Create connection over TCP
-        try:
-            self.ser =  serial.serial_for_url(url, timeout=timeout)
-            logger.info(f"Connected to {url} | Exit using CTRL+C")
-            self.url = url
-            return self.ser
-        except serial.serialutil.SerialException as e:
-            logger.error(e)
+        # it is impossible to detect broken connections so this indicates a reconnection try
+        self.needs_reconnect = False
 
-    def connect_serial(self, port, baudrate, timeout=0):
-        # Create connection over Serial port
-        try:
-            self.ser = serial.Serial(port, baudrate, timeout=timeout, exclusive=True)
-            logger.info(f"Connected to {port} @ {baudrate} | Exit using CTRL+C")
+        # put received chars in queue
+        self.chr_q = queue.Queue()
 
-            # save serial connection info so we can reconnect quicker
-            self.port = port
-            self.baudrate = baudrate
-            self.timeout = timeout
-            return self.ser
-        except serial.serialutil.SerialException as e:
-            logger.error(e)
-
-    def try_connect_ports(self, ports, baudrate, timeout=0):
-        # try all ports in list, NOTE discovery is somehow super slow from thread
-        for port in ports:
-            logger.info(f"Trying to connect to {port}")
-            if self.connect_serial(port, baudrate, timeout):
-                return True
-        else:
-            logger.error("No serial ports found")
+    def is_alive(self):
+        return self.ser != None
 
     def set_lock_recv(self, state):
         # set lock to free up port for sending (see docstring)
@@ -155,14 +126,16 @@ class SerialConnThread(threading.Thread, LockFile):
             return
 
         try:
-            return self.ser.read().decode()
+            c = self.ser.read().decode()
+            if c:
+                self.chr_q.put(c)
+                return c
+
         except UnicodeDecodeError as e:
             logger.error(e)
             logger.error(f"Wrong baudrate? {self.baudrate}")
-        # TODO why is this typeerror check needed when using lock/unlock function???
-        except TypeError as e:
-            logger.error(f"exception in recv_chr() fix this! {e}")
-            return
+        except serial.serialutil.SerialException as e:
+            self.needs_reconnect = True
 
     def send(self, data):
         # send a line
@@ -178,7 +151,6 @@ class SerialConnThread(threading.Thread, LockFile):
 
     def close(self):
         if self.ser != None:
-            logger.info("Closing connection")
             self.ser.close()
 
     def run(self):
@@ -186,24 +158,89 @@ class SerialConnThread(threading.Thread, LockFile):
         msg_shown = False
 
         while not self.stopped:
-            # if serial is locked
             if self.is_locked():
                 if not msg_shown:
                     logger.info("Serial is locked")
+                    self.close()
                     msg_shown = True
-                    self.ser.close()
 
-            # if serial was locked
-            elif msg_shown:
-                msg_shown = False
-                logger.info("Serial is unlocked")
-                if not self.ser.is_open:
-                    if self.url:
-                        self.connect_TCP(self.url, self.timeout)
-                    else:
-                        self.connect_serial(self.port, self.baudrate, self.timeout)
+            else:
+                if self.needs_reconnect or self.ser == None or not self.ser.is_open:
+                    self.connect()
+                    msg_shown = False
+
+            self.recv_chr()
             time.sleep(0.01)
         self.close()
+
+
+class SerialConnThread(ConnThreadBaseClass):
+    def __init__(self, lockfile, ports, baudrate, timeout):
+        ConnThreadBaseClass.__init__(self, lockfile, timeout)
+
+        self.ports = ports
+        self.baudrate = baudrate
+
+        # this will be the port after successfull first connection
+        self.port = None
+
+
+    def connect_serial(self, port, show_error=True):
+        # Create connection over Serial port
+        try:
+            self.ser = serial.Serial(port, self.baudrate, timeout=self.timeout, exclusive=True)
+            logger.info(f"Connected to {port} @ {self.baudrate} | Exit using CTRL+C")
+
+            # save serial connection info so we can reconnect quicker
+            self.port = port
+            self.needs_reconnect = False
+            return self.ser
+        except serial.serialutil.SerialException as e:
+            if show_error:
+                logger.error(e)
+
+    def reconnect(self):
+        """ Connection has been established before.
+            Keep trying to reconnect """
+        self.close()
+        logger.info("Attempting to reconnect...")
+        while not self.ser.is_open:
+            if self.connect_serial(self.port, show_error=False):
+                break
+            time.sleep(0.1)
+
+
+    def connect(self):
+        # try all ports in list, NOTE discovery is somehow super slow from thread
+        if self.port != None:
+            self.reconnect()
+            return True
+
+        for port in self.ports:
+            logger.info(f"Trying to connect to {port}")
+            if self.connect_serial(port):
+                return True
+        else:
+            logger.error("No serial ports found")
+            self.stopped = True
+
+
+
+class TCPConnThread(ConnThreadBaseClass):
+    def __init__(self, lockfile):
+        ConnThreadBaseClass.__init__(self, lockfile)
+
+        self.url = None
+
+    def connect(self, url, timeout=1):
+        # Create connection over TCP
+        try:
+            self.ser =  serial.serial_for_url(url, timeout=timeout)
+            logger.info(f"Connected to {url} | Exit using CTRL+C")
+            self.url = url
+            return self.ser
+        except serial.serialutil.SerialException as e:
+            logger.error(e)
 
 
 class ReaderThread(threading.Thread, LockFile, Color):
@@ -215,9 +252,6 @@ class ReaderThread(threading.Thread, LockFile, Color):
         self.conn_manager = conn_manager
         self.log_file_path = log_file_path
 
-        # queue holds received messages that can be processed by other threads
-        self.q = queue.Queue()
-
     def stop(self):
         logger.debug("Stopping reader thread")
         self.stopped = True
@@ -225,49 +259,42 @@ class ReaderThread(threading.Thread, LockFile, Color):
     def sanitize(self, data):
         return data.strip()
 
-    def non_blocking_recv(self):
-        buf = ''
-        while not self.stopped:
-            c = self.conn_manager.recv_chr()
-
-            if not c:
-                # sleep when no data is received so CPU doesn't spike
-                time.sleep(0.01)
-                continue
-            elif c == '\n':
-                return buf
-            else:
-                buf += c
-
     def write_to_log_file(self, data):
         with open(self.log_file_path, 'a') as f:
             f.write(data + '\n')
 
     def run(self):
         logger.debug("Starting reader thread")
+        buf = ""
+
         while not self.stopped:
 
-            try:
-                data = self.non_blocking_recv()
-            except serial.serialutil.SerialException as e:
-                logger.error("Lost connection")
-                self.stop()
-                continue
+            while not self.conn_manager.chr_q.empty():
 
-            if data == None:
-                continue
+                c = self.conn_manager.chr_q.get()
 
-            data = self.sanitize(data)
+                if c == None:
+                    continue
 
-            if data:
-                # append to queue so we can process messages from other threads
-                self.q.put(data)
+                if c == '\n':
+                    if buf and self.log_file_path:
+                        self.write_to_log_file(buf)
+                    buf = ""
 
-                print(self.colorize('<', 'bgreen'), data)
+                elif c:
+                    if not buf:
+                        print(self.colorize('< ', 'bgreen'), end='')
 
-                # log to file
-                if self.log_file_path:
-                    self.write_to_log_file(data)
+                    buf += c
+
+                else:
+                    logger.error(f"Received weird things: >{c}<")
+                    continue
+
+                print(c, end='')
+
+
+            time.sleep(0.1)
 
 
 class InputBaseClass(Color):
@@ -324,10 +351,6 @@ class InputSTDIN(InputBaseClass):
         else:
             logger.info(f"Starting reading from STDIN, wait={self.confirm_wait} sec")
 
-        # fast forward, empty queue
-        while not self.reader_thread.q.empty():
-            self.reader_thread.q.get()
-
         for c,l in enumerate(sys.stdin):
             l = l.rstrip('\n')
 
@@ -359,16 +382,21 @@ class SerialKiller(LockFile):
         except FileNotFoundError:
             pass
 
+    def start_threads(self):
+        # make connection, exit on fail
+        if self.url:
+            self.conn_manager_thread = TCPConnThread(self.lockfile)
+            self.conn_manager_thread.start()
+        else:
+            self.conn_manager_thread = SerialConnThread(self.lockfile, self.ports, self.baudrate, self.timeout)
+            self.conn_manager_thread.start()
+
+        self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
+        self.reader_thread.start()
+
     def stop_threads(self):
         self.reader_thread.stop()
         self.conn_manager_thread.stop()
-
-    def start_threads(self):
-        # this thread is passed to every thread that needs serial access
-        self.conn_manager_thread = SerialConnThread(self.lockfile)
-        self.conn_manager_thread.start()
-        self.reader_thread = ReaderThread(self.lockfile, self.conn_manager_thread, self.log_file_path)
-        self.reader_thread.start()
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
@@ -432,6 +460,11 @@ class SerialKiller(LockFile):
         else:
             self.log_file_path = None
 
+    def wait_for_connection(self, thread):
+        while not thread.stopped:
+            if thread.is_alive():
+                return True
+
     def run(self):
         self.parse_args()
 
@@ -446,15 +479,10 @@ class SerialKiller(LockFile):
 
         self.start_threads()
 
-        # make connection, exit on fail
-        if self.url:
-            if not self.conn_manager_thread.connect_TCP(self.url, self.timeout):
-                self.stop_threads()
-                return
-        else:
-            if not self.conn_manager_thread.try_connect_ports(self.ports, self.baudrate, self.timeout):
-                self.stop_threads()
-                return
+        # wait for initial connection. exit on fail
+        if not self.wait_for_connection(self.conn_manager_thread):
+            self.stop_threads()
+            return
 
         # create object to get input from user or stdin
         if not os.isatty(sys.stdin.fileno()):
