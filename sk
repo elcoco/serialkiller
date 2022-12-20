@@ -150,8 +150,8 @@ class ConnThreadBaseClass(threading.Thread, LockFile):
                     self.close()
 
             else:
-                #if self.needs_reconnect or self.ser == None or not self.ser.is_open:
-                #if not self.is_alive():
+                # FIXME if in reconnect cycle and program is locked,
+                #       program will not free the serial port, it should be freed
                 if self.needs_reconnect or self.ser == None or not self.ser.is_open:
                     self.connect()
 
