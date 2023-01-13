@@ -29,6 +29,7 @@ HISTORY_PATH = '/tmp/sk_history.txt'
 # TODO auto coloring of configurabel strings (ERROR,INFO,DEBUG)
 #      this is difficult since we con't write words to display but chars
 # FIXME TCP is now broken
+# TODO receiving after sending is super slow
 
 COLORS = {
     'black':    '\033[0;30m',
@@ -143,9 +144,17 @@ class ConnBaseClass(threading.Thread, LockFile):
         # send a line from queue
         if self.ser == None:
             return
+        if not self.ser.is_open:
+            return
+        if self.is_locked():
+            return
 
         while not self.wq.empty():
-            self.ser.write(self.wq.get().encode())
+            msg = self.wq.get()
+            msg = msg + "\n"
+            self.ser.write(msg.encode())
+            self.ser.flush()
+
 
     def close(self):
         if self.ser != None:
@@ -172,7 +181,9 @@ class ConnBaseClass(threading.Thread, LockFile):
                 # receive chars and put in queue
                 self.recv_chr()
 
-            time.sleep(0.01)
+
+            # NOTE no sleep needed here because the timeout in recv_chr() takes care of that
+
         self.close()
 
 
@@ -408,7 +419,7 @@ class SerialKiller(LockFile):
         parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
         parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default=115200)
         parser.add_argument('-U', '--url',         help="url eg: socket://host:port", default=None)
-        parser.add_argument('-t', '--timeout',     help="default: 1", metavar='SEC', default=1)
+        parser.add_argument('-t', '--timeout',     help="default: 0.1", metavar='SEC', default=0.1)
         parser.add_argument('-L', '--log',         help="log data to file", action='store_true')
         parser.add_argument('-P', '--log_dir',     help="specify log dir", metavar='DIR', default=os.path.expanduser('~'))
         parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
@@ -499,14 +510,12 @@ class SerialKiller(LockFile):
         if not os.isatty(sys.stdin.fileno()):
             ic = InputSTDIN(self.conn_manager_thread,
                             self.wq,
-                            #self.reader_thread,
                             self.history_path,
                             self.confirm_str,
                             self.confirm_timeout,
                             self.confirm_wait)
         else:
             ic = InputUser( self.wq,
-                            #self.reader_thread,
                             self.history_path)
 
         # enter input loop
