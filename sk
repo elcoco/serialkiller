@@ -71,7 +71,10 @@ class LockFile():
         self.lockfile = path
 
     def is_locked(self):
-        return self.lockfile.is_file()
+        if self.lockfile.is_file():
+            time.sleep(.05)
+            return True
+        #return self.lockfile.is_file()
 
     def lock(self):
         self.lockfile.touch()
