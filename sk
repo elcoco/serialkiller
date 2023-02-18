@@ -76,6 +76,12 @@ class LockFile():
             return True
         #return self.lockfile.is_file()
 
+    def toggle(self):
+        if self.lockfile.is_file():
+            self.unlock()
+        else:
+            self.lock()
+
     def lock(self):
         self.lockfile.touch()
         logger.info(f"Created lockfile: {self.lockfile}")
@@ -337,6 +343,10 @@ class InputUser(InputBaseClass):
             if data and not self.is_locked():
                 self.wq.put(data)
                 print(colorize('>', 'bmagenta'), data)
+
+            # toggle lock on enter
+            elif (not data):
+                self.toggle()
 
 
 class InputSTDIN(InputBaseClass):
