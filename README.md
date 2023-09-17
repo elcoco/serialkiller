@@ -3,7 +3,7 @@
 A less annoying serial terminal written in Python3
 
 ### Features
-- send and receive data over serial port or serial over TCP
+- send and receive data over serial port
 - read data from pipe and send over serial, wait for confirmation string
 - **temporary free up port** to upload code by using an external command
 - **log data** to file
@@ -26,9 +26,6 @@ $ sk
 
 # Specify port and baudrate
 $ sk -p /dev/ttyUSB0 -b 9600
-
-# Specify url to connect over eg. telnet
-$ sk -U socket://localhost:23
 
 # Read from STDIN line by line and send over serial.
 # Wait for string 'ok' before sending next line.
@@ -62,14 +59,14 @@ usage: sk [-h] [-p PORT] [-b RATE] [-U URL] [-t SEC] [-L] [-P DIR] [-l] [-u] [-S
 
 SerialKiller does serial things.
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -p PORT, --port PORT  default: autodetect
   -b RATE, --baudrate RATE
                         default: 115200
   -U URL, --url URL     url eg: socket://host:port
   -t SEC, --timeout SEC
-                        default: 0
+                        default: 0.1
   -L, --log             log data to file
   -P DIR, --log_dir DIR
                         specify log dir
