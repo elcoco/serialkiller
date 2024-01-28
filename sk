@@ -31,6 +31,22 @@ HISTORY_PATH = '/tmp/sk_history.txt'
 # FIXME TCP is now broken
 # TODO receiving after sending is super slow
 
+PRINTABLE_TO_CCHAR_MAP = {
+    "\\n" : "\n",       # newline
+    "\\r" : "\r",       # carriage return
+    "\\t" : "\t",       # horizontal tab
+    "\\b" : "\b",       # backspace
+    "\\v" : "\v",       # vertical tab
+}
+
+CCHAR_TO_PRINTABLE_MAP = {
+    "\n" : "\\n",
+    "\r" : "\\r",
+    "\t" : "\\t",
+    "\b" : "\\b",
+    "\v" : "\\v",
+}
+
 COLORS = {
     'black':    '\033[0;30m',
     'bblack':   '\033[1;30m',
@@ -265,11 +281,12 @@ class TCPConnThread(ConnBaseClass):
 
 class ReaderThread(threading.Thread):
     """ Reads data from the connection an prints it to STDOUT and optionally to a file """
-    def __init__(self, rq, log_file_path):
+    def __init__(self, rq, log_file_path, print_cchars):
         threading.Thread.__init__(self)
         self.stopped = False
         self.log_file_path = log_file_path
         self.rq = rq
+        self.print_cchars = print_cchars
 
     def stop(self):
         logger.debug("Stopping reader thread")
@@ -307,7 +324,7 @@ class ReaderThread(threading.Thread):
 
                 elif c:
                     if not buf:
-                        print(colorize('< ', 'bgreen'), end='')
+                        print(colorize('< ', 'bgreen'), end='', flush=True)
 
                     buf += c
 
@@ -315,8 +332,16 @@ class ReaderThread(threading.Thread):
                     logger.error(f"Received weird things: >{c}<")
                     continue
 
-                print(c, end='')
-
+                # convert control chars (\n, \t, etc...) 
+                if self.print_cchars:
+                    if c in CCHAR_TO_PRINTABLE_MAP.keys():
+                        print(colorize(CCHAR_TO_PRINTABLE_MAP[c], "bmagenta"), end='', flush=True)
+                        if c == '\n':
+                            print()
+                    else:
+                        print(c, end='', flush=True)
+                else:
+                    print(c, end='', flush=True)
 
             time.sleep(0.1)
 
@@ -331,8 +356,18 @@ class InputBaseClass(LockFile):
 
 class InputUser(InputBaseClass):
     """ Handles user input """
-    def __init__(self, wq, history_path):
+    def __init__(self, wq, history_path, send_newline):
         super().__init__(wq, history_path)
+        self.send_newline = send_newline
+
+    def highlight_cchars(self, data):
+        """ Highlight control chars. eg: \n, \t, etc. """
+        for c in data:
+            if c in CCHAR_TO_PRINTABLE_MAP.keys():
+                print(colorize(CCHAR_TO_PRINTABLE_MAP[c], "bmagenta"), end='', flush=True)
+            else:
+                print(c, end='', flush=True)
+        print()
 
     def get_input(self):
         logger.debug("Starting reading from user input")
@@ -341,8 +376,17 @@ class InputUser(InputBaseClass):
             readline.write_history_file(self.history_path)
 
             if data and not self.is_locked():
+
+                # input() doesn't allow direct input of control chars so we must convert them. eg: \\n -> \n
+                for pc, cc in PRINTABLE_TO_CCHAR_MAP.items():
+                    data = data.replace(pc, cc)
+
+                if self.send_newline:
+                    data += "\n"
+
                 self.wq.put(data)
-                print(colorize('>', 'bmagenta'), data)
+                print(colorize('> ', 'bmagenta'), end='')
+                self.highlight_cchars(data)
 
             # toggle lock on enter
             elif (not data):
@@ -418,7 +462,7 @@ class SerialKiller(LockFile):
             self.conn_manager_thread = SerialConnThread(self.rq, self.wq, self.ports, self.baudrate, self.timeout)
             self.conn_manager_thread.start()
 
-        self.reader_thread = ReaderThread(self.rq, self.log_file_path)
+        self.reader_thread = ReaderThread(self.rq, self.log_file_path, self.print_cchars)
         self.reader_thread.start()
 
     def stop_threads(self):
@@ -429,25 +473,29 @@ class SerialKiller(LockFile):
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='SerialKiller does serial things.')
-        parser.add_argument('-p', '--port',        help="default: autodetect", default=None)
-        parser.add_argument('-b', '--baudrate',    help="default: 115200", metavar='RATE', default=115200)
-        parser.add_argument('-U', '--url',         help="url eg: socket://host:port", default=None)
-        parser.add_argument('-t', '--timeout',     help="default: 0.1", metavar='SEC', default=0.1)
-        parser.add_argument('-L', '--log',         help="log data to file", action='store_true')
-        parser.add_argument('-P', '--log_dir',     help="specify log dir", metavar='DIR', default=os.path.expanduser('~'))
-        parser.add_argument('-l', '--lock',        help="free serial port", action='store_true')
-        parser.add_argument('-u', '--unlock',      help="reconnect to serial", action='store_true')
+        parser.add_argument('-p', '--port',           help="default: autodetect", default=None)
+        parser.add_argument('-b', '--baudrate',       help="default: 115200", metavar='RATE', default=115200)
+        parser.add_argument('-U', '--url',            help="url eg: socket://host:port", default=None)
+        parser.add_argument('-t', '--timeout',        help="default: 0.1", metavar='SEC', default=0.1)
+        parser.add_argument('-P', '--print_cchars',   help="convert incoming control chars to printable", action='store_true')
+        parser.add_argument('-N', '--send_newline',   help="send newline on enter", action='store_true')
+        parser.add_argument('-L', '--log',            help="log data to file", action='store_true')
+        parser.add_argument('-d', '--log_dir',        help="specify log dir", metavar='DIR', default=os.path.expanduser('~'))
+        parser.add_argument('-l', '--lock',           help="free serial port", action='store_true')
+        parser.add_argument('-u', '--unlock',         help="reconnect to serial", action='store_true')
 
-        parser.add_argument('-S', '--confirm_str', help="wait for this string before sending next message, when listening to STDIN", metavar='STR', default=None)
+        parser.add_argument('-S', '--confirm_str',    help="wait for this string before sending next message, when listening to STDIN", metavar='STR', default=None)
         parser.add_argument('-T', '--confirm_timeout', help="seconds before timeout when waiting for response, when listening to STDIN", metavar='SEC', default=5)
-        parser.add_argument('-W', '--confirm_wait', help="wait time before sending next message, when listening to STDIN", metavar='SEC', default=1)
+        parser.add_argument('-W', '--confirm_wait',   help="wait time before sending next message, when listening to STDIN", metavar='SEC', default=1)
 
-        parser.add_argument('-d', '--debug',       help="enable debugging", action='store_true')
+        parser.add_argument('-D', '--debug',          help="enable debugging", action='store_true')
         args = parser.parse_args()
 
         self.port = args.port
         self.baudrate = args.baudrate
         self.timeout = args.timeout
+        self.print_cchars = args.print_cchars
+        self.send_newline = args.send_newline
         self.debug = args.debug
         self.url = args.url
         self.do_lock = args.lock
@@ -529,7 +577,8 @@ class SerialKiller(LockFile):
                             self.confirm_wait)
         else:
             ic = InputUser( self.wq,
-                            self.history_path)
+                            self.history_path,
+                            self.send_newline)
 
         # enter input loop
         try:
