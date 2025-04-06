@@ -5,10 +5,10 @@ import os,sys
 import time
 import argparse
 import readline     # interactive mode history at input()
-import datetime
 import logging
 import queue
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 import serial
 from serial.tools.list_ports import comports
@@ -296,8 +296,9 @@ class ReaderThread(threading.Thread):
         return data.strip()
 
     def write_to_log_file(self, data):
+        dt = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with open(self.log_file_path, 'a') as f:
-            f.write(data + '\n')
+            f.write(f"{dt} {data}\n")
 
     def fmt_output(self, string):
         for k,v in COLOR_MAP.items():
@@ -403,11 +404,11 @@ class InputSTDIN(InputBaseClass):
 
     def wait_for_str(self, confirm_str, timeout=5):
         msg = ''
-        t = datetime.datetime.now()
+        t = datetime.now()
 
         # wait till we get the expected response, timeout if not
         while msg != confirm_str:
-            if (datetime.datetime.now() - t) > datetime.timedelta(seconds=timeout):
+            if (datetime.now() - t) > timedelta(seconds=timeout):
                 logger.error("Message timed out")
                 return
             if not self.reader_thread.q.empty():
@@ -532,7 +533,7 @@ class SerialKiller(LockFile):
                 logger.error('Log directory doesn\'t exist, disabling logging')
                 self.log_file_path = None
             else:
-                self.log_file_path = os.path.join(self.log_dir, datetime.datetime.now().strftime('%Y-%m-%d_%H_%M_%S') + '.log')
+                self.log_file_path = os.path.join(self.log_dir, datetime.now().strftime('%Y-%m-%d_%H_%M_%S') + '.log')
                 logger.info(f"Logging to file: {self.log_file_path}")
         else:
             self.log_file_path = None
