@@ -134,10 +134,10 @@ class ConnBaseClass(threading.Thread, LockFile):
         self._stopped: bool = False
 
         # read and write queue
-        self._rq = rq
-        self._wq = wq
+        self._rq: Queue = rq
+        self._wq: Queue = wq
 
-        self.timeout = timeout
+        self.timeout: int = timeout
 
         # holds serial connection object
         self.ser: Optional[serial.Serial] = None
@@ -226,8 +226,8 @@ class SerialConnThread(ConnBaseClass):
     def __init__(self, rq: Queue, wq: Queue, ports: list[str], baudrate: int, timeout: int):
         ConnBaseClass.__init__(self, rq, wq, timeout)
 
-        self._ports = ports
-        self._baudrate = baudrate
+        self._ports: list[str] = ports
+        self._baudrate: int = baudrate
 
         # this will be the port after successfull first connection
         self._port: Optional[str] = None
@@ -275,7 +275,7 @@ class TCPConnThread(ConnBaseClass):
     def __init__(self, url: str, rq: Queue, wq: Queue, timeout: int):
         ConnBaseClass.__init__(self, rq, wq, timeout)
         # def __init__(self, rq: Queue, wq: Queue, timeout: int):
-        self._url = url
+        self._url: str = url
 
     def connect(self, timeout=1) -> Optional[serial.Serial]:
         """ Create connection over TCP """
@@ -293,11 +293,11 @@ class TCPConnThread(ConnBaseClass):
 
 class ReaderThread(threading.Thread):
     """ Reads data from the connection an prints it to STDOUT and optionally to a file """
-    def __init__(self, rq: Queue, log_file_path: Optional[Path], do_print_cchars: str):
+    def __init__(self, rq: Queue, log_file_path: Optional[Path], do_print_cchars: bool):
         threading.Thread.__init__(self)
-        self.log_file_path = log_file_path
-        self._rq = rq
-        self._do_print_cchars = do_print_cchars
+        self.log_file_path: Optional[Path] = log_file_path
+        self._rq: Queue = rq
+        self._do_print_cchars: bool = do_print_cchars
         self.stopped: bool = False
 
     def stop(self):
@@ -312,7 +312,7 @@ class ReaderThread(threading.Thread):
 
     def run(self):
         logger.debug("Starting reader thread")
-        buf = ""
+        buf: str = ""
 
         while not self.stopped:
 
@@ -356,15 +356,15 @@ class InputBaseClass(LockFile):
     """ Handles the way data is retrieved from either user, STDIN or whatever before it is sent over the serial connection """
     def __init__(self, wq: Queue, history_path: Path):
         LockFile.__init__(self, Path(LOCK_PATH))
-        self.history_path = history_path
-        self._wq = wq
+        self.history_path: Path = history_path
+        self._wq: Queue = wq
 
 
 class InputUser(InputBaseClass):
     """ Handles user input """
     def __init__(self, wq: Queue, history_path: Path, do_send_newline: bool):
         super().__init__(wq, history_path)
-        self.do_send_newline = do_send_newline
+        self.do_send_newline: bool = do_send_newline
 
     def highlight_cchars(self, data: str):
         """ Highlight control chars. eg: \n, \t, etc. """
