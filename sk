@@ -270,7 +270,7 @@ class SerialConnThread(ConnBaseClass):
                 if self._connect(port, tries=1):
                     return self.ser
             logger.error("No serial ports found")
-            self.stop()
+            self.do_stop()
 
 
 class TCPConnThread(ConnBaseClass):
@@ -287,10 +287,10 @@ class TCPConnThread(ConnBaseClass):
             return self.ser
         except SerialException as e:
             logger.error(e)
-            self.stop()
+            self.do_stop()
         except ValueError as e:
             logger.error(e)
-            self.stop()
+            self.do_stop()
 
 
 class ReaderThread(threading.Thread):
