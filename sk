@@ -26,12 +26,13 @@ streamhandler = logging.StreamHandler(sys.stdout)
 streamhandler.setLevel(logging.DEBUG)
 logger.addHandler(streamhandler)
 
-# TODO auto coloring of configurabel strings (ERROR,INFO,DEBUG)
-#      this is difficult (impossible) since we con't write words to display but chars
+# NOFIX auto coloring of configurabel strings (ERROR,INFO,DEBUG)
+#       this is difficult (impossible) since we con't write words to display but chars
+#       Can be solved by using ncurses.
 # FIXME TCP is now broken
-# TODO receiving after sending is super slow
-# TODO Tie lockfile to specific instance so we can run/lock multiple instances at the same time
+# TODO  Tie lockfile to specific instance so we can run/lock multiple instances at the same time
 #       When only one instance is running, default to this instance
+# DONE  When starting sk with a specific port selected but port is not reachable, just keep trying until found
 
 
 LOCK_PATH = Path('/tmp/serialkiller.lock')
@@ -144,7 +145,6 @@ class ConnBaseClass(threading.Thread, LockFile):
         # it is impossible to detect broken connections so this indicates a reconnection try
         self.needs_reconnect: bool = False
 
-
     def connect(self) -> Optional[serial.Serial]:
         """ Needs to be implemented when subclassing and return a serial connection instance """
 
@@ -200,7 +200,7 @@ class ConnBaseClass(threading.Thread, LockFile):
     def run(self):
         logger.debug("Starting connection manager thread")
 
-        while not self._stopped:
+        while not self.is_stopped():
             if self.is_locked():
                 if self.ser and self.ser.is_open:
                     logger.info("Serialkiller is locked")
@@ -232,61 +232,63 @@ class SerialConnThread(ConnBaseClass):
         # this will be the port after successfull first connection
         self._port: Optional[str] = None
 
-    def _connect_serial(self, port: str, show_error: bool=True) -> Optional[serial.Serial]:
-        """ Create connection over Serial port """
-        try:
-            self.ser = serial.Serial(port, self._baudrate, timeout=self.timeout, exclusive=True)
-            logger.info(f"Connected to {port} @ {self._baudrate} | Exit using CTRL+C")
+        if len(ports) == 1:
+            self._port: Optional[str] = ports[0]
+        else:
+            # this will be the port after successfull first connection
+            self._port: Optional[str] = None
 
-            # save serial connection info so we can reconnect quicker
-            self._port = port
-            self.needs_reconnect = False
-            return self.ser
-        except SerialException as e:
-            if show_error:
-                logger.error(e)
-
-    def _reconnect(self) -> Optional[serial.Serial]:
-        """ Connection has been established before.
-            Keep trying to reconnect """
-        assert(self._port)
+    def _connect(self, port: str, tries: int=-1) -> Optional[serial.Serial]:
+        """ Try to connect to port.
+            param: tries = max amount of tries
+            If tries == -1, try forever """
+        logger.info(f"Attempting to (re)connect to port {port}")
         self.close()
-        logger.info("Attempting to reconnect...")
-        while self.ser and not self.ser.is_open:
-            if self._connect_serial(self._port, show_error=False):
+        while True:
+            try:
+                self.ser = serial.Serial(port, self._baudrate, timeout=self.timeout, exclusive=True)
+                logger.info(f"Connected to {port} @ {self._baudrate} | Exit using CTRL+C")
+                self._port = port
+                self.needs_reconnect = False
                 return self.ser
+            except SerialException as e:
+                tries -= 1
+                if not tries:
+                    break
+
             time.sleep(0.1)
 
     def connect(self) -> Optional[serial.Serial]:
-        # try all ports in list, NOTE discovery is somehow super slow from thread
-        if self._port != None:
-            return self._reconnect()
-
-        for port in self._ports:
-            logger.info(f"Trying to connect to {port}")
-            if self._connect_serial(port):
-                return self.ser
+        """ Try all ports from list only once.
+            If only one port, keep trying to connect forever... """
+        if self._port:
+            return self._connect(self._port)
         else:
+            for port in self._ports:
+                if self._connect(port, tries=1):
+                    return self.ser
             logger.error("No serial ports found")
             self.stop()
 
 
-# FIXME!!!
-#class TCPConnThread(ConnBaseClass):
-#    def __init__(self):
-#        ConnBaseClass.__init__()
-#
-#        self.url = None
-#
-#    def connect(self, url, timeout=1) -> Optional[serial.Serial]:
-#        # Create connection over TCP
-#        try:
-#            self.ser =  serial.serial_for_url(url, timeout=timeout)
-#            logger.info(f"Connected to {url} | Exit using CTRL+C")
-#            self.url = url
-#            return self.ser
-#        except SerialException as e:
-#            logger.error(e)
+class TCPConnThread(ConnBaseClass):
+    def __init__(self, url: str, rq: Queue, wq: Queue, timeout: int):
+        ConnBaseClass.__init__(self, rq, wq, timeout)
+        # def __init__(self, rq: Queue, wq: Queue, timeout: int):
+        self._url = url
+
+    def connect(self, timeout=1) -> Optional[serial.Serial]:
+        """ Create connection over TCP """
+        try:
+            self.ser =  serial.serial_for_url(self._url, timeout=timeout)
+            logger.info(f"Connected to {self._url} | Exit using CTRL+C")
+            return self.ser
+        except SerialException as e:
+            logger.error(e)
+            self.stop()
+        except ValueError as e:
+            logger.error(e)
+            self.stop()
 
 
 class ReaderThread(threading.Thread):
@@ -481,6 +483,7 @@ class SerialKiller(LockFile):
         while not thread.is_stopped():
             if thread.is_alive():
                 return True
+            time.sleep(.1)
 
     def run(self):
         self.parse_args()
@@ -499,8 +502,13 @@ class SerialKiller(LockFile):
             while self.is_locked():
                 pass
 
-        self.conn_manager_thread = SerialConnThread(self._rq, self._wq, self._ports, self._baudrate, self._timeout)
+        if self._url:
+            self.conn_manager_thread = TCPConnThread(self._url, self._rq, self._wq, self._timeout)
+        else:
+            self.conn_manager_thread = SerialConnThread(self._rq, self._wq, self._ports, self._baudrate, self._timeout)
+
         self.conn_manager_thread.start()
+
         self.reader_thread = ReaderThread(self._rq, self.log_file_path, self._do_print_cchars)
         self.reader_thread.start()
 
