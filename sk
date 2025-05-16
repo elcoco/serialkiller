@@ -33,6 +33,7 @@ logger.addHandler(streamhandler)
 # TODO  Tie lockfile to specific instance so we can run/lock multiple instances at the same time
 #       When only one instance is running, default to this instance
 # DONE  When starting sk with a specific port selected but port is not reachable, just keep trying until found
+# TODO  Specify what kind of line ending, eg: \n or \r\n
 
 
 LOCK_PATH = Path('/tmp/serialkiller.lock')
@@ -151,7 +152,7 @@ class ConnBaseClass(threading.Thread, LockFile):
     def is_alive(self) -> bool:
         return self.ser != None
 
-    def stop(self):
+    def do_stop(self):
         logger.debug("Stopping connection manager thread")
         self._stopped = True
 
@@ -244,7 +245,7 @@ class SerialConnThread(ConnBaseClass):
             If tries == -1, try forever """
         logger.info(f"Attempting to (re)connect to port {port}")
         self.close()
-        while True:
+        while not self.is_stopped():
             try:
                 self.ser = serial.Serial(port, self._baudrate, timeout=self.timeout, exclusive=True)
                 logger.info(f"Connected to {port} @ {self._baudrate} | Exit using CTRL+C")
@@ -252,6 +253,7 @@ class SerialConnThread(ConnBaseClass):
                 self.needs_reconnect = False
                 return self.ser
             except SerialException as e:
+                logger.debug(e)
                 tries -= 1
                 if not tries:
                     break
@@ -298,11 +300,11 @@ class ReaderThread(threading.Thread):
         self.log_file_path: Optional[Path] = log_file_path
         self._rq: Queue = rq
         self._do_print_cchars: bool = do_print_cchars
-        self.stopped: bool = False
+        self._stopped: bool = False
 
-    def stop(self):
+    def do_stop(self):
         logger.debug("Stopping reader thread")
-        self.stopped = True
+        self._stopped = True
 
     def _write_to_log_file(self, data: str):
         assert(self.log_file_path)
@@ -314,7 +316,7 @@ class ReaderThread(threading.Thread):
         logger.debug("Starting reader thread")
         buf: str = ""
 
-        while not self.stopped:
+        while not self._stopped:
 
             while not self._rq.empty():
 
@@ -375,7 +377,7 @@ class InputUser(InputBaseClass):
                 print(c, end='', flush=True)
         print()
 
-    def get_input(self):
+    def input_loop(self):
         logger.debug("Starting reading from user input")
         while True:
             data = input()
@@ -395,7 +397,7 @@ class InputUser(InputBaseClass):
                 self.highlight_cchars(data)
 
             # toggle lock on enter
-            elif (not data):
+            elif not data:
                 self.toggle()
 
 
@@ -414,13 +416,26 @@ class SerialKiller(LockFile):
         self._rq: Queue = Queue()
         self._wq: Queue = Queue()
 
-        self.log_file_path: Optional[Path] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._conn_manager_thread: Optional[threading.Thread] = None
+
+    def _start_threads(self):
+        if self._url:
+            self._conn_manager_thread = TCPConnThread(self._url, self._rq, self._wq, self._timeout)
+        else:
+            self._conn_manager_thread = SerialConnThread(self._rq, self._wq, self._ports, self._baudrate, self._timeout)
+
+        self._conn_manager_thread.start()
+        self._reader_thread = ReaderThread(self._rq, self._log_file_path, self._do_print_cchars)
+        self._reader_thread.start()
 
     def stop_threads(self):
-        self.reader_thread.stop()
-        self.conn_manager_thread.stop()
-        self.reader_thread.join()
-        self.conn_manager_thread.join()
+        if self._reader_thread:
+            self._reader_thread.do_stop()
+            self._reader_thread.join()
+        if self._conn_manager_thread:
+            self._conn_manager_thread.do_stop()
+            self._conn_manager_thread.join()
 
     def sort_ports(self, ports: list[str], filters: list[str]):
         """ Sort port list by multiple filters """
@@ -443,16 +458,14 @@ class SerialKiller(LockFile):
         parser.add_argument('-D', '--debug',          help="enable debugging", action='store_true')
         args = parser.parse_args()
 
-        port = args.port
         self._baudrate = args.baudrate
         self._timeout = args.timeout
+        self._url = args.url
+
         self._do_print_cchars = args.print_cchars
         self._do_send_newline = args.send_newline
-        self._debug = args.debug
-        self._url = args.url
         self._do_lock = args.lock
         self._do_unlock = args.unlock
-        log_dir: Path = args.log_dir
 
         if args.debug:
             logger.setLevel(logging.DEBUG)
@@ -461,22 +474,20 @@ class SerialKiller(LockFile):
             logger.setLevel(logging.INFO)
             streamhandler.setFormatter(formatter_info)
 
-        # only do port discovery if no url is given
         if not self._url:
-            # discover available ports if no port is supplied on CLI
-            ports = [port] if port else [dev.device for dev in comports(include_links=True)]
+            # Find us some ports
+            ports = [args.port] if args.port else [dev.device for dev in sorted(comports(include_links=True))]
             self._ports = self.sort_ports(ports, PREFER_PORTS)
 
-            for port in self._ports:
-                logger.debug(f"Found serial port: {port}")
-
-        if log_dir:
-            if not log_dir.is_dir():
-                logger.error('Log directory doesn\'t exist, disabling logging')
+        if args.log_dir:
+            if not args.log_dir.is_dir():
+                logger.error("Log directory doesn't exist!")
                 sys.exit()
 
-            self.log_file_path = (log_dir / datetime.now().strftime('%Y-%m-%d_%H_%M_%S')).with_suffix('.log')
-            logger.info(f"Logging to file: {self.log_file_path}")
+            self._log_file_path: Optional[Path] = (args.log_dir / datetime.now().strftime('%Y-%m-%d_%H_%M_%S')).with_suffix('.log')
+            logger.info(f"Logging to file: {self._log_file_path}")
+        else:
+            self._log_file_path: Optional[Path] = None
 
     def wait_for_connection(self, thread):
         """ Loop until connection is confirmed or thread is stopped """
@@ -488,7 +499,6 @@ class SerialKiller(LockFile):
     def run(self):
         self.parse_args()
 
-        # check if user wants to free up serial port
         if self._do_lock:
             self.lock()
             return
@@ -498,40 +508,28 @@ class SerialKiller(LockFile):
             return
 
         if self.is_locked():
-            logger.info("Serialkiller is already locked, use --unlock first")
+            logger.info("Serialkiller is locked, use --unlock")
             while self.is_locked():
                 pass
 
-        if self._url:
-            self.conn_manager_thread = TCPConnThread(self._url, self._rq, self._wq, self._timeout)
-        else:
-            self.conn_manager_thread = SerialConnThread(self._rq, self._wq, self._ports, self._baudrate, self._timeout)
+        self._start_threads()
 
-        self.conn_manager_thread.start()
-
-        self.reader_thread = ReaderThread(self._rq, self.log_file_path, self._do_print_cchars)
-        self.reader_thread.start()
-
-        # wait for initial connection. exit on fail
-        if not self.wait_for_connection(self.conn_manager_thread):
-            self.stop_threads()
+        # Wait for initial connection. exit on fail
+        if not self.wait_for_connection(self._conn_manager_thread):
             return
 
-        ic = InputUser( self._wq,
-                        self._history_path,
-                        self._do_send_newline)
+        ic = InputUser(self._wq, self._history_path, self._do_send_newline)
 
-        # enter input loop
         try:
-            ic.get_input()
-        except KeyboardInterrupt:
-            logger.debug("Received keyboard interrupt")
+            ic.input_loop()
         except SerialException as e:
             logger.error(e)
-
-        self.stop_threads()
 
 
 if __name__ == "__main__":
     sk = SerialKiller()
-    sk.run()
+    try:
+        sk.run()
+    except KeyboardInterrupt:
+        pass
+    sk.stop_threads()
